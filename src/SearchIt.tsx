@@ -2,12 +2,9 @@ import { AntDesign, MaterialCommunityIcons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { colors } from "./config/theme";
-import { getAllFlatVerses } from "./data/conversion.utils";
 import { StandardWorksFlatVerse } from "./data/data.types";
-import filterItems from "./utils/filterItems";
+import useFilterItems from "./utils/useFilterItems";
 import Verse from "./Verse";
-
-const filterAllVerses = filterItems(getAllFlatVerses());
 
 interface SearchItState {
   verses: StandardWorksFlatVerse[];
@@ -23,6 +20,8 @@ const SearchIt = () => {
   });
   const [wholeWord, setWholeWord] = useState(false);
   const [searchString, setSearchString] = useState("");
+
+  const filterAllVerses = useFilterItems();
 
   useEffect(() => {
     const visibleNew = filterAllVerses(searchString, wholeWord);
