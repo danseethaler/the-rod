@@ -1771,6 +1771,11 @@
   dependencies:
     "@types/istanbul-lib-report" "*"
 
+"@types/lodash@^4.14.168":
+  version "4.14.168"
+  resolved "https://registry.yarnpkg.com/@types/lodash/-/lodash-4.14.168.tgz#fe24632e79b7ade3f132891afff86caa5e5ce008"
+  integrity sha512-oVfRvqHV/V6D1yifJbVRU3TMp8OT6o6BG+U9MkwuJ3U8/CsDHvalRpsxBqivn71ztOFZBTfJMvETbqHiaNSj7Q==
+
 "@types/node@*":
   version "14.14.32"
   resolved "https://registry.yarnpkg.com/@types/node/-/node-14.14.32.tgz#90c5c4a8d72bbbfe53033f122341343249183448"
@@ -3042,6 +3047,11 @@ expo-asset@~8.2.1:
     path-browserify "^1.0.0"
     url-parse "^1.4.4"
 
+expo-clipboard@~1.0.1:
+  version "1.0.1"
+  resolved "https://registry.yarnpkg.com/expo-clipboard/-/expo-clipboard-1.0.1.tgz#cc73e01dce83cca0df2c539d2c862aa892e70bfc"
+  integrity sha512-TQjMi9mAZr8jQOSl/XJLVwW6DTmjA3qAOUMk4BuxlMvJ1NqJbCITLEBwUcLW/rNewgmXLytoLzRpxadcxSfJAQ==
+
 expo-constants@~9.3.3:
   version "9.3.5"
   resolved "https://registry.yarnpkg.com/expo-constants/-/expo-constants-9.3.5.tgz#78085763e8ed100a5f2df7c682fd99631aa03d5e"
@@ -4302,7 +4312,7 @@ lodash.throttle@^4.1.1:
   resolved "https://registry.yarnpkg.com/lodash.throttle/-/lodash.throttle-4.1.1.tgz#c23e91b710242ac70c37f1e1cda9274cc39bf2f4"
   integrity sha1-wj6RtxAkKscMN/HhzaknTMOb8vQ=
 
-lodash@^4.17.13, lodash@^4.17.14, lodash@^4.17.15, lodash@^4.17.19, lodash@^4.3.0, lodash@^4.5.0, lodash@^4.6.0:
+lodash@^4.17.13, lodash@^4.17.14, lodash@^4.17.15, lodash@^4.17.19, lodash@^4.17.21, lodash@^4.3.0, lodash@^4.5.0, lodash@^4.6.0:
   version "4.17.21"
   resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.21.tgz#679591c564c3bffaae8454cf0b3df370c3d6911c"
   integrity sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg==
@@ -5249,6 +5259,11 @@ querystringify@^2.1.1:
   version "2.2.0"
   resolved "https://registry.yarnpkg.com/querystringify/-/querystringify-2.2.0.tgz#3345941b4153cb9d082d8eee4cda2016a9aef7f6"
   integrity sha512-FIqgj2EUvTa7R50u0rGsyTftzjYmv/a3hO345bZNrqabNqjtgiDMgmo4mkUjd+nzU5oF3dClKqFIPUKybUyqoQ==
+
+quick-score@^0.0.10:
+  version "0.0.10"
+  resolved "https://registry.yarnpkg.com/quick-score/-/quick-score-0.0.10.tgz#4fa956b814ae7e3a2a7e94f7d0716dfa750639f8"
+  integrity sha512-IrDSAI00ifPkR4RjyJvf07hyfw+w2b6SuT18SQS8wOKMfYw4oIolf5wQliWkQ8OJTA7fOTYDzw7be/V3g+rsRA==
 
 range-parser@~1.2.1:
   version "1.2.1"
