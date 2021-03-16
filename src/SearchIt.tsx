@@ -29,7 +29,7 @@ const SearchIt = () => {
   }, [searchString, wholeWord]);
 
   return (
-    <View style={{ alignSelf: "stretch" }}>
+    <View style={{ flex: 1, alignSelf: "stretch" }}>
       <View
         style={{
           padding: 12,
