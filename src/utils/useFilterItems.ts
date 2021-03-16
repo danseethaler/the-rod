@@ -9,6 +9,7 @@ const useFilterItems = () => {
     flatVerses
   );
   const [previousSearchString, setPreviousSearchString] = useState("");
+  const [previousWholeWord, setPreviousWholeWord] = useState(false);
 
   return (searchString: string, wholeWord: boolean) => {
     if (searchString.length < 3) {
@@ -18,9 +19,14 @@ const useFilterItems = () => {
     const searchStringLowercase = searchString.toLowerCase();
 
     const start = Date.now();
-    const availableVerses = searchString.includes(previousSearchString)
-      ? previousFilteredVerses
-      : flatVerses;
+
+    const searchStringIsInclusive = searchString.includes(previousSearchString);
+    const wholeWordChanged = previousWholeWord === true && wholeWord === false;
+
+    const availableVerses =
+      searchStringIsInclusive && !wholeWordChanged
+        ? previousFilteredVerses
+        : flatVerses;
 
     let filteredVerses = filter(availableVerses, (verse) =>
       verse.filterText.includes(searchStringLowercase)
@@ -35,6 +41,7 @@ const useFilterItems = () => {
 
     setPreviousSearchString(searchString);
     setPreviousFilteredVerses(filteredVerses);
+    setPreviousWholeWord(wholeWord);
 
     return {
       verses: filteredVerses.slice(0, 10),
