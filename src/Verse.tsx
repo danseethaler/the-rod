@@ -47,7 +47,7 @@ const Verse = ({ verse, searchString }: Props) => {
             }
 
             return (
-              <>
+              <React.Fragment key={index}>
                 {textPart}
                 <Text
                   style={{
@@ -58,7 +58,7 @@ const Verse = ({ verse, searchString }: Props) => {
                 >
                   {searchString.toLowerCase()}
                 </Text>
-              </>
+              </React.Fragment>
             );
           })}
         </Text>
