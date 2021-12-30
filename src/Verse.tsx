@@ -1,4 +1,4 @@
-import Clipboard from "expo-clipboard";
+import * as Clipboard from "expo-clipboard";
 import React from "react";
 import { Linking, Pressable, Text, View } from "react-native";
 import { colors } from "./config/theme";
@@ -28,7 +28,7 @@ const Verse = ({ verse, searchString }: Props) => {
         <Text
           style={{
             color: colors.text,
-            fontWeight: "600",
+            fontWeight: "800",
           }}
         >
           {verse.reference}
@@ -52,8 +52,10 @@ const Verse = ({ verse, searchString }: Props) => {
                 <Text
                   style={{
                     color: colors.background,
-                    backgroundColor: "#ffd379",
+                    backgroundColor: colors.linkBackground,
                     fontWeight: "bold",
+                    borderRadius: 3,
+                    overflow: "hidden",
                   }}
                 >
                   {searchString.toLowerCase()}
@@ -69,17 +71,17 @@ const Verse = ({ verse, searchString }: Props) => {
           borderRadius: 8,
           padding: 16,
           paddingVertical: 12,
-          backgroundColor: "#f1ebfd",
+          backgroundColor: colors.background,
           justifyContent: "space-between",
           flexDirection: "row",
           alignItems: "center",
         }}
         onPress={() => Linking.openURL(buildUrl(verse))}
       >
-        <Text style={{ color: colors.background, fontWeight: "600" }}>
-          Link
+        <Text style={{ color: colors.linkBackground, fontWeight: "600" }}>
+          Open
         </Text>
-        <Feather name="external-link" size={18} color={colors.cardGray} />
+        <Feather name="external-link" size={18} color={colors.linkBackground} />
       </Pressable>
     </View>
   );

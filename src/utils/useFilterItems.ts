@@ -24,12 +24,15 @@ const useFilterItems = () => {
     const wholeWordChanged = previousWholeWord === true && wholeWord === false;
 
     const availableVerses =
-      searchStringIsInclusive && !wholeWordChanged
+      searchStringIsInclusive && !wholeWordChanged && !wholeWord
         ? previousFilteredVerses
         : flatVerses;
 
-    let filteredVerses = filter(availableVerses, (verse) =>
-      verse.filterText.includes(searchStringLowercase)
+    let filteredVerses = filter(
+      availableVerses,
+      (verse) =>
+        verse.filterText.includes(searchStringLowercase) ||
+        verse.reference.toLowerCase().includes(searchStringLowercase)
     );
 
     if (wholeWord) {
