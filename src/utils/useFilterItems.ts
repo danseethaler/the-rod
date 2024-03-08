@@ -4,10 +4,11 @@ import { getAllFlatVerses } from "../data/conversion.utils";
 
 const flatVerses = getAllFlatVerses();
 
+const numberOfVersionToShow = 50;
+
 const useFilterItems = () => {
-  const [previousFilteredVerses, setPreviousFilteredVerses] = useState(
-    flatVerses
-  );
+  const [previousFilteredVerses, setPreviousFilteredVerses] =
+    useState(flatVerses);
   const [previousSearchString, setPreviousSearchString] = useState("");
   const [previousWholeWord, setPreviousWholeWord] = useState(false);
 
@@ -47,7 +48,7 @@ const useFilterItems = () => {
     setPreviousWholeWord(wholeWord);
 
     return {
-      verses: filteredVerses.slice(0, 10),
+      verses: filteredVerses.slice(0, numberOfVersionToShow),
       resultCount: filteredVerses.length,
       duration: Date.now() - start,
     };

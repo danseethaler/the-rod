@@ -66,7 +66,7 @@ const SearchIt = () => {
             inputRef.current?.focus();
           }}
           style={{
-            padding: 11.5,
+            padding: 10.5,
             backgroundColor: colors.cardGray,
             borderLeftWidth: 1,
             borderColor: colors.background,
