@@ -4,7 +4,7 @@ import {getAllFlatVerses} from '../data/conversion.utils';
 
 const flatVerses = getAllFlatVerses();
 
-const numberOfVersionToShow = 50;
+const numberOfVersionToShow = 25;
 
 const useFilterItems = () => {
   const [previousFilteredVerses, setPreviousFilteredVerses] =

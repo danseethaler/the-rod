@@ -5,7 +5,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "deploy:web": "expo build:web && netlify deploy --prod",
+    "deploy:web": "expo export:web && netlify deploy --dir=dist --prod",
     "eject": "expo eject"
   },
   "dependencies": {
@@ -27,8 +27,12 @@
     "@types/react-dom": "~19.1.1",
     "@types/react-native": "~0.73.0",
     "babel-preset-expo": "^12.0.11",
+    "netlify-cli": "^19.1.5",
     "prettier": "^3.5.3",
     "typescript": "~5.8.3"
+  },
+  "web": {
+    "bundler": "webpack"
   },
   "private": true
 }
