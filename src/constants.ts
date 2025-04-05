@@ -1,2 +1,2 @@
 export const baseReferenceUrl =
-  "https://www.churchofjesuschrist.org/study/scriptures";
+  'https://www.churchofjesuschrist.org/study/scriptures';

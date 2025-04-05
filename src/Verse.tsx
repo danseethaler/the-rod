@@ -1,17 +1,17 @@
-import * as Clipboard from "expo-clipboard";
-import React from "react";
-import { Linking, Pressable, Text, View } from "react-native";
-import { colors } from "./config/theme";
-import { StandardWorksFlatVerse } from "./data/data.types";
-import { buildCopyText, buildUrl } from "./utils/urlHelpers.utils";
-import { Feather } from "@expo/vector-icons";
+import * as Clipboard from 'expo-clipboard';
+import React from 'react';
+import {Linking, Pressable, Text, View} from 'react-native';
+import {colors} from './config/theme';
+import {StandardWorksFlatVerse} from './data/data.types';
+import {buildCopyText, buildUrl} from './utils/urlHelpers.utils';
+import {Feather} from '@expo/vector-icons';
 
 interface Props {
   verse: StandardWorksFlatVerse;
   searchString: string;
 }
 
-const Verse = ({ verse, searchString }: Props) => {
+const Verse = ({verse, searchString}: Props) => {
   const verseParts = verse.text.toLowerCase().split(searchString.toLowerCase());
 
   return (
@@ -28,7 +28,7 @@ const Verse = ({ verse, searchString }: Props) => {
         <Text
           style={{
             color: colors.text,
-            fontWeight: "800",
+            fontWeight: '800',
           }}
         >
           {verse.reference}
@@ -53,9 +53,9 @@ const Verse = ({ verse, searchString }: Props) => {
                   style={{
                     color: colors.background,
                     backgroundColor: colors.linkBackground,
-                    fontWeight: "bold",
+                    fontWeight: 'bold',
                     borderRadius: 3,
-                    overflow: "hidden",
+                    overflow: 'hidden',
                   }}
                 >
                   {searchString.toLowerCase()}
@@ -72,13 +72,13 @@ const Verse = ({ verse, searchString }: Props) => {
           padding: 16,
           paddingVertical: 12,
           backgroundColor: colors.background,
-          justifyContent: "space-between",
-          flexDirection: "row",
-          alignItems: "center",
+          justifyContent: 'space-between',
+          flexDirection: 'row',
+          alignItems: 'center',
         }}
         onPress={() => Linking.openURL(buildUrl(verse))}
       >
-        <Text style={{ color: colors.linkBackground, fontWeight: "600" }}>
+        <Text style={{color: colors.linkBackground, fontWeight: '600'}}>
           Open
         </Text>
         <Feather name="external-link" size={18} color={colors.linkBackground} />

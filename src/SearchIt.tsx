@@ -1,10 +1,10 @@
-import { AntDesign, MaterialCommunityIcons } from "@expo/vector-icons";
-import React, { useEffect, useReducer, useRef, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { colors } from "./config/theme";
-import { StandardWorksFlatVerse } from "./data/data.types";
-import useFilterItems from "./utils/useFilterItems";
-import Verse from "./Verse";
+import {AntDesign, MaterialCommunityIcons} from '@expo/vector-icons';
+import React, {useEffect, useReducer, useRef, useState} from 'react';
+import {Pressable, ScrollView, Text, TextInput, View} from 'react-native';
+import {colors} from './config/theme';
+import {StandardWorksFlatVerse} from './data/data.types';
+import useFilterItems from './utils/useFilterItems';
+import Verse from './Verse';
 
 interface SearchItState {
   verses: StandardWorksFlatVerse[];
@@ -19,14 +19,14 @@ const SearchIt = () => {
     duration: 0,
   });
   const [wholeWord, setWholeWord] = useState(false);
-  const [searchString, setSearchString] = useState("");
+  const [searchString, setSearchString] = useState('');
 
   const filterAllVerses = useFilterItems();
 
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
-      inputRef.current?.focus();
+    inputRef.current?.focus();
   }, []);
 
   useEffect(() => {
@@ -35,14 +35,14 @@ const SearchIt = () => {
   }, [searchString, wholeWord]);
 
   return (
-    <View style={{ flex: 1, alignSelf: "stretch" }}>
+    <View style={{flex: 1, alignSelf: 'stretch'}}>
       <View
         style={{
           padding: 12,
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "center",
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
       >
         <TextInput
@@ -61,13 +61,13 @@ const SearchIt = () => {
             borderTopLeftRadius: 8,
             borderBottomLeftRadius: 8,
             color: colors.white,
-            fontWeight: "500",
+            fontWeight: '500',
           }}
-          onChangeText={(newSearch) => setSearchString(newSearch)}
+          onChangeText={newSearch => setSearchString(newSearch)}
         />
         <Pressable
           onPress={() => {
-            setSearchString("");
+            setSearchString('');
             inputRef.current?.focus();
           }}
           style={{
@@ -104,12 +104,10 @@ const SearchIt = () => {
         </Pressable> */}
       </View>
       <ScrollView keyboardShouldPersistTaps="handled">
-        <Text
-          style={{ color: colors.text, padding: 16, alignSelf: "flex-end" }}
-        >
+        <Text style={{color: colors.text, padding: 16, alignSelf: 'flex-end'}}>
           {visible.resultCount} Results in {visible.duration}ms
         </Text>
-        {visible.verses.map((verse) => (
+        {visible.verses.map(verse => (
           <Verse
             key={verse.reference}
             verse={verse}

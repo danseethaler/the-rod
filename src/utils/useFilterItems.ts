@@ -1,6 +1,6 @@
-import { filter } from "lodash";
-import { useState } from "react";
-import { getAllFlatVerses } from "../data/conversion.utils";
+import {filter} from 'lodash';
+import {useState} from 'react';
+import {getAllFlatVerses} from '../data/conversion.utils';
 
 const flatVerses = getAllFlatVerses();
 
@@ -9,12 +9,12 @@ const numberOfVersionToShow = 50;
 const useFilterItems = () => {
   const [previousFilteredVerses, setPreviousFilteredVerses] =
     useState(flatVerses);
-  const [previousSearchString, setPreviousSearchString] = useState("");
+  const [previousSearchString, setPreviousSearchString] = useState('');
   const [previousWholeWord, setPreviousWholeWord] = useState(false);
 
   return (searchString: string, wholeWord: boolean) => {
     if (searchString.length < 3) {
-      return { verses: [], resultCount: 0, duration: 0 };
+      return {verses: [], resultCount: 0, duration: 0};
     }
 
     const searchStringLowercase = searchString.toLowerCase();
@@ -31,15 +31,15 @@ const useFilterItems = () => {
 
     let filteredVerses = filter(
       availableVerses,
-      (verse) =>
+      verse =>
         verse.filterText.includes(searchStringLowercase) ||
         verse.reference.toLowerCase().includes(searchStringLowercase)
     );
 
     if (wholeWord) {
-      filteredVerses = filter(availableVerses, (verse) => {
+      filteredVerses = filter(availableVerses, verse => {
         const regex = `(\\W|^)${searchString.trim()}(\\W|$)`;
-        return new RegExp(regex, "gi").test(verse.text);
+        return new RegExp(regex, 'gi').test(verse.text);
       });
     }
 

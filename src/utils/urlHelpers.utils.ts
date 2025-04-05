@@ -1,5 +1,5 @@
-import { baseReferenceUrl } from "../constants";
-import { StandardWorksFlatVerse } from "../data/data.types";
+import {baseReferenceUrl} from '../constants';
+import {StandardWorksFlatVerse} from '../data/data.types';
 
 export const buildUrl = (item: StandardWorksFlatVerse) => {
   if (item.bookSlug) {
