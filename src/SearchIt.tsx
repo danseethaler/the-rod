@@ -26,6 +26,10 @@ const SearchIt = () => {
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
+      inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     const visibleNew = filterAllVerses(searchString, wholeWord);
     setVisible(visibleNew);
   }, [searchString, wholeWord]);
@@ -47,6 +51,7 @@ const SearchIt = () => {
           placeholder="O be wise…"
           placeholderTextColor={colors.text}
           ref={inputRef}
+          autoFocus
           style={{
             paddingVertical: 12,
             paddingHorizontal: 16,

@@ -4,6 +4,8 @@ import { SafeAreaView, StyleSheet, View } from "react-native";
 import { colors } from "./src/config/theme";
 import SearchIt from "./src/SearchIt";
 
+import './web/index.css';
+
 export default function App() {
   return (
     <SafeAreaView style={{ backgroundColor: colors.background, flex: 1 }}>
