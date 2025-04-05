@@ -5,7 +5,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "deploy:web": "npx expo export --platform web && netlify deploy --dir=dist --prod",
+    "export:web": "expo export --platform web && node scripts/addMetaTags.js",
+    "deploy:web": "npm run export:web && netlify deploy --dir=dist --prod",
     "eject": "expo eject"
   },
   "dependencies": {
