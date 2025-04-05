@@ -9,23 +9,25 @@
     "eject": "expo eject"
   },
   "dependencies": {
-    "@types/lodash": "^4.14.168",
-    "expo": "^44.0.3",
-    "expo-clipboard": "~2.1.0",
-    "expo-status-bar": "~1.0.3",
+    "@expo/metro-runtime": "~4.0.1",
+    "@types/lodash": "^4.17.16",
+    "expo": "^52.0.44",
+    "expo-clipboard": "~7.0.1",
+    "expo-status-bar": "~2.0.1",
     "lodash": "^4.17.21",
-    "quick-score": "^0.0.10",
-    "react": "^17.0.2",
-    "react-dom": "^17.0.2",
-    "react-native": "0.64.3",
-    "react-native-web": "~0.13.12"
+    "quick-score": "^0.2.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-native": "0.78.2",
+    "react-native-web": "~0.20.0"
   },
   "devDependencies": {
-    "@babel/core": "~7.9.0",
-    "@types/react": "~16.9.35",
-    "@types/react-dom": "~16.9.8",
-    "@types/react-native": "~0.63.2",
-    "typescript": "~4.0.0"
+    "@babel/core": "~7.26.10",
+    "@types/react": "~19.1.0",
+    "@types/react-dom": "~19.1.1",
+    "@types/react-native": "~0.73.0",
+    "babel-preset-expo": "^12.0.11",
+    "typescript": "~5.8.3"
   },
   "private": true
 }
