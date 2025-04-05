@@ -1,10 +1,28 @@
+import {Feather} from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import React from 'react';
 import {Linking, Pressable, Text, View} from 'react-native';
 import {colors} from './config/theme';
 import {StandardWorksFlatVerse} from './data/data.types';
 import {buildCopyText, buildUrl} from './utils/urlHelpers.utils';
-import {Feather} from '@expo/vector-icons';
+
+import {Platform} from 'react-native';
+
+const openDeepLink = (url: string) => {
+  if (Platform.OS === 'web') {
+    // Web/PWA: use anchor trick to avoid blank modal
+    const a = document.createElement('a');
+    a.href = url;
+    a.style.display = 'none';
+    a.target = '_self';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } else {
+    // Native (iOS/Android)
+    Linking.openURL(url);
+  }
+};
 
 interface Props {
   verse: StandardWorksFlatVerse;
@@ -76,7 +94,7 @@ const Verse = ({verse, searchString}: Props) => {
           flexDirection: 'row',
           alignItems: 'center',
         }}
-        onPress={() => Linking.openURL(buildUrl(verse))}
+        onPress={() => openDeepLink(buildUrl(verse))}
       >
         <Text style={{color: colors.linkBackground, fontWeight: '600'}}>
           Open
