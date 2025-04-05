@@ -30,7 +30,13 @@
       }
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "name": "The Rod",
+      "shortName": "Rod",
+      "themeColor": "#fdcf68",
+      "backgroundColor": "#fdcf68",
+      "display": "standalone",
+      "orientation": "portrait"
     },
     "description": ""
   }
