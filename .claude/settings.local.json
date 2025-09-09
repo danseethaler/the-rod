@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:stackoverflow.com)",
+      "Bash(yarn lint:*)",
+      "Bash(yarn:*)",
+      "Bash(rm:*)",
+      "WebFetch(domain:community.revenuecat.com)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npm run:*)",
+      "Bash(cat:*)",
+      "Bash(git tag:*)",
+      "Bash(git commit:*)",
+      "Bash(git log:*)",
+      "Bash(git describe:*)",
+      "WebFetch(domain:revenuecat.github.io)",
+      "Bash(grep:*)",
+      "Bash(npx knip:*)",
+      "WebFetch(domain:styled-components.com)",
+      "Read(//Users/danseethaler/Library/Developer/CoreSimulator/Devices/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
