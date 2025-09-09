@@ -4,7 +4,7 @@ import React from 'react';
 import {Linking, Pressable, Text, View} from 'react-native';
 import {colors} from './config/theme';
 import {StandardWorksFlatVerse} from './data/data.types';
-import {buildCopyText, buildUrl} from './utils/urlHelpers.utils';
+import {buildCopyText, buildPlainCopyText, buildUrl} from './utils/urlHelpers.utils';
 
 import {Platform} from 'react-native';
 
@@ -83,24 +83,50 @@ const Verse = ({verse, searchString}: Props) => {
           })}
         </Text>
       </Pressable>
-      <Pressable
+      <View
         style={{
-          marginVertical: 8,
-          borderRadius: 8,
-          padding: 16,
-          paddingVertical: 12,
-          backgroundColor: colors.background,
-          justifyContent: 'space-between',
+          marginTop: 8,
           flexDirection: 'row',
-          alignItems: 'center',
+          gap: 8,
         }}
-        onPress={() => openDeepLink(buildUrl(verse))}
       >
-        <Text style={{color: colors.linkBackground, fontWeight: '600'}}>
-          Open
-        </Text>
-        <Feather name="external-link" size={18} color={colors.linkBackground} />
-      </Pressable>
+        <Pressable
+          style={{
+            flex: 1,
+            borderRadius: 8,
+            padding: 16,
+            paddingVertical: 12,
+            backgroundColor: colors.background,
+            justifyContent: 'space-between',
+            flexDirection: 'row',
+            alignItems: 'center',
+          }}
+          onPress={() => openDeepLink(buildUrl(verse))}
+        >
+          <Text style={{color: colors.linkBackground, fontWeight: '600'}}>
+            Open
+          </Text>
+          <Feather name="external-link" size={18} color={colors.linkBackground} />
+        </Pressable>
+        <Pressable
+          style={{
+            flex: 1,
+            borderRadius: 8,
+            padding: 16,
+            paddingVertical: 12,
+            backgroundColor: colors.background,
+            justifyContent: 'space-between',
+            flexDirection: 'row',
+            alignItems: 'center',
+          }}
+          onPress={() => Clipboard.setString(buildPlainCopyText(verse))}
+        >
+          <Text style={{color: colors.linkBackground, fontWeight: '600'}}>
+            Copy
+          </Text>
+          <Feather name="copy" size={18} color={colors.linkBackground} />
+        </Pressable>
+      </View>
     </View>
   );
 };

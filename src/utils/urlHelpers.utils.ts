@@ -13,3 +13,7 @@ export const buildCopyText = (item: StandardWorksFlatVerse) => {
   const link = buildUrl(item);
   return `> [${item.reference}](${link}) — ${item.text}`;
 };
+
+export const buildPlainCopyText = (item: StandardWorksFlatVerse) => {
+  return `${item.reference} — ${item.text}`;
+};
