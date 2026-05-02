@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
-import {Layers, Search} from 'lucide-react-native';
+import {useRouter} from 'expo-router';
+import {ChevronRight, Info, Layers, Search} from 'lucide-react-native';
 import {useColorScheme} from 'nativewind';
 import React from 'react';
 import {Linking, ScrollView, Text, View} from 'react-native';
@@ -9,6 +10,7 @@ import {AnimatedPressable} from '@/components/AnimatedPressable';
 import {hapticLight} from '@/lib/haptics';
 
 export default function SettingsScreen() {
+  const router = useRouter();
   const {colorScheme} = useColorScheme();
   const isDark = colorScheme === 'dark';
   const version = Constants.expoConfig?.version ?? '1.0.0';
@@ -56,6 +58,29 @@ export default function SettingsScreen() {
               proceedeth out of the mouth of the Lord." — Deuteronomy 8:3
             </Text>
           </View>
+        </View>
+
+        <View className="mx-4 mb-4 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 overflow-hidden">
+          <AnimatedPressable
+            onPress={() => {
+              hapticLight();
+              router.push('/about' as never);
+            }}
+            className="flex-row items-center px-4 py-3 gap-3"
+          >
+            <View className="w-9 h-9 rounded-full bg-brand-50 dark:bg-brand-900/40 items-center justify-center">
+              <Info size={20} color={isDark ? '#fbbf24' : '#b45309'} />
+            </View>
+            <View className="flex-1">
+              <Text className="text-base font-semibold text-neutral-900 dark:text-white">
+                About Krumb
+              </Text>
+              <Text className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">
+                Why this app exists, and how to use it.
+              </Text>
+            </View>
+            <ChevronRight size={20} color={isDark ? '#737373' : '#a3a3a3'} />
+          </AnimatedPressable>
         </View>
 
         <View className="mx-4 mb-4 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 overflow-hidden">
@@ -114,7 +139,5 @@ function Row({
 }
 
 function Divider() {
-  return (
-    <View className="h-px bg-neutral-100 dark:bg-neutral-700 ml-16" />
-  );
+  return <View className="h-px bg-neutral-100 dark:bg-neutral-700 ml-16" />;
 }

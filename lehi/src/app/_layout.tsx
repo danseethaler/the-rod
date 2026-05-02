@@ -1,8 +1,4 @@
-import {
-  DarkTheme,
-  DefaultTheme,
-  ThemeProvider,
-} from '@react-navigation/native';
+import {DarkTheme, DefaultTheme, ThemeProvider} from '@react-navigation/native';
 import {Stack} from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import {StatusBar} from 'expo-status-bar';
@@ -16,8 +12,8 @@ import {useStacksStore} from '@/store/useStacksStore';
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function HydrationGate({children}: {children: React.ReactNode}) {
-  const hydrated = useStacksStore((s) => s.hydrated);
-  const hydrate = useStacksStore((s) => s.hydrate);
+  const hydrated = useStacksStore(s => s.hydrated);
+  const hydrate = useStacksStore(s => s.hydrate);
 
   useEffect(() => {
     hydrate();
@@ -46,10 +42,7 @@ export default function RootLayout() {
           <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
             <StatusBar style={isDark ? 'light' : 'dark'} />
             <Stack>
-              <Stack.Screen
-                name="(tabs)"
-                options={{headerShown: false}}
-              />
+              <Stack.Screen name="(tabs)" options={{headerShown: false}} />
               <Stack.Screen
                 name="stack/new"
                 options={{
@@ -77,6 +70,24 @@ export default function RootLayout() {
                   presentation: 'formSheet',
                   animation: 'slide_from_bottom',
                   sheetAllowedDetents: 'fitToContents' as never,
+                }}
+              />
+              <Stack.Screen name="about" options={{headerShown: false}} />
+              <Stack.Screen
+                name="import-preview"
+                options={{
+                  headerShown: false,
+                  presentation: 'formSheet',
+                  animation: 'slide_from_bottom',
+                }}
+              />
+              <Stack.Screen name="verse" options={{headerShown: false}} />
+              <Stack.Screen
+                name="stack-picker"
+                options={{
+                  headerShown: false,
+                  presentation: 'formSheet',
+                  animation: 'slide_from_bottom',
                 }}
               />
             </Stack>

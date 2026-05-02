@@ -11,7 +11,7 @@ export default ({config}: ConfigContext): ExpoConfig => ({
   owner: 'weekly-llc',
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
-  icon: './assets/icon.png',
+  icon: IS_DEV ? './assets/icon-dev.png' : './assets/icon.png',
   splash: {
     image: './assets/splash.png',
     resizeMode: 'contain',

@@ -1,8 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const STORAGE_KEYS = {
-  stacks: 'rod:stacks:v1',
-  stackItems: 'rod:stack-items:v1',
+  // v2 — stack-item shape changed: notes lost their thought field, verses
+  // renamed `text` → `verseText`, and every item gained a `headline`. Old
+  // v1 keys are intentionally orphaned (the user opted out of a migration).
+  stacks: 'rod:stacks:v2',
+  stackItems: 'rod:stack-items:v2',
   prefs: 'rod:prefs:v1',
 } as const;
 

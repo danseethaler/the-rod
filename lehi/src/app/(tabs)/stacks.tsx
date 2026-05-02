@@ -1,6 +1,7 @@
 import {useScrollToTop} from '@react-navigation/native';
+import * as Clipboard from 'expo-clipboard';
 import {useRouter} from 'expo-router';
-import {Layers, Plus} from 'lucide-react-native';
+import {ClipboardPaste, Layers, Plus} from 'lucide-react-native';
 import {useColorScheme} from 'nativewind';
 import React, {useRef} from 'react';
 import {FlatList, Text, View} from 'react-native';
@@ -8,7 +9,9 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 
 import {AnimatedListItem} from '@/components/AnimatedListItem';
 import {AnimatedPressable} from '@/components/AnimatedPressable';
-import {hapticLight} from '@/lib/haptics';
+import {hapticError, hapticLight} from '@/lib/haptics';
+import {MarkdownParseError} from '@/lib/markdown';
+import {toast} from '@/lib/toast';
 import {STACK_STATUS_LABEL, type Stack} from '@/lib/types';
 import {useStacksStore} from '@/store/useStacksStore';
 
@@ -16,7 +19,9 @@ export default function StacksScreen() {
   const router = useRouter();
   const {colorScheme} = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const stacks = useStacksStore((s) => s.stacks);
+  const stacks = useStacksStore(s => s.stacks);
+  const previewImport = useStacksStore(s => s.previewImport);
+  const setPendingImport = useStacksStore(s => s.setPendingImport);
 
   const listRef = useRef<FlatList<Stack>>(null);
   useScrollToTop(listRef);
@@ -24,6 +29,30 @@ export default function StacksScreen() {
   const onAdd = () => {
     hapticLight();
     router.push('/stack/new');
+  };
+
+  const onImport = async () => {
+    hapticLight();
+    const md = await Clipboard.getStringAsync();
+    if (!md.trim()) {
+      hapticError();
+      toast({title: 'Clipboard is empty', preset: 'error'});
+      return;
+    }
+    try {
+      const preview = previewImport(md);
+      setPendingImport(preview);
+      router.push({pathname: '/import-preview' as never});
+    } catch (err) {
+      hapticError();
+      toast({
+        title:
+          err instanceof MarkdownParseError
+            ? err.message
+            : 'Could not parse markdown',
+        preset: 'error',
+      });
+    }
   };
 
   return (
@@ -40,13 +69,22 @@ export default function StacksScreen() {
             Drafts in progress. Bake until done.
           </Text>
         </View>
-        <AnimatedPressable
-          onPress={onAdd}
-          className="w-11 h-11 items-center justify-center bg-brand-500 rounded-full"
-          accessibilityLabel="New stack"
-        >
-          <Plus size={22} color="#fff" />
-        </AnimatedPressable>
+        <View className="flex-row items-center gap-2">
+          <AnimatedPressable
+            onPress={onImport}
+            className="w-11 h-11 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800"
+            accessibilityLabel="Import from clipboard"
+          >
+            <ClipboardPaste size={20} color={isDark ? '#fbbf24' : '#b45309'} />
+          </AnimatedPressable>
+          <AnimatedPressable
+            onPress={onAdd}
+            className="w-11 h-11 items-center justify-center bg-brand-500 rounded-full"
+            accessibilityLabel="New stack"
+          >
+            <Plus size={22} color="#fff" />
+          </AnimatedPressable>
+        </View>
       </View>
 
       {stacks.length === 0 ? (
@@ -58,8 +96,8 @@ export default function StacksScreen() {
             No stacks yet
           </Text>
           <Text className="text-base text-neutral-500 dark:text-neutral-400 mt-2 text-center leading-6">
-            A stack is a draft talk in motion. Start one, then drop verses
-            and notes into it as you ponder.
+            A stack is a draft talk in motion. Start one, then drop verses and
+            notes into it as you ponder.
           </Text>
           <AnimatedPressable
             onPress={onAdd}
@@ -72,7 +110,7 @@ export default function StacksScreen() {
         <FlatList
           ref={listRef}
           data={stacks}
-          keyExtractor={(s) => s.id}
+          keyExtractor={s => s.id}
           contentContainerStyle={{paddingBottom: 24, paddingHorizontal: 16}}
           renderItem={({item, index}) => (
             <AnimatedListItem index={index}>

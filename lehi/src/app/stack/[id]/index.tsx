@@ -34,18 +34,18 @@ export default function StackDetailScreen() {
   const isDark = colorScheme === 'dark';
 
   const stack = useStacksStore(selectStackById(id));
-  const allItems = useStacksStore((s) => s.items);
+  const allItems = useStacksStore(s => s.items);
   const items = useMemo(
     () => resolveStackItems(stack, allItems),
     [stack, allItems]
   );
-  const setStackStatus = useStacksStore((s) => s.setStackStatus);
-  const deleteStack = useStacksStore((s) => s.deleteStack);
-  const reorderItems = useStacksStore((s) => s.reorderItems);
-  const addNoteToStack = useStacksStore((s) => s.addNoteToStack);
-  const removeItem = useStacksStore((s) => s.removeItem);
-  const updateNoteBody = useStacksStore((s) => s.updateNoteBody);
-  const updateThought = useStacksStore((s) => s.updateThought);
+  const setStackStatus = useStacksStore(s => s.setStackStatus);
+  const deleteStack = useStacksStore(s => s.deleteStack);
+  const reorderItems = useStacksStore(s => s.reorderItems);
+  const addNoteToStack = useStacksStore(s => s.addNoteToStack);
+  const removeItem = useStacksStore(s => s.removeItem);
+  const updateNoteBody = useStacksStore(s => s.updateNoteBody);
+  const updateVerseThought = useStacksStore(s => s.updateVerseThought);
 
   const [draftNote, setDraftNote] = useState('');
 
@@ -102,7 +102,7 @@ export default function StackDetailScreen() {
   const onDelete = () => {
     Alert.alert(
       'Delete stack?',
-      'This permanently removes the stack and all its items. This can\'t be undone.',
+      "This permanently removes the stack and all its items. This can't be undone.",
       [
         {text: 'Cancel', style: 'cancel'},
         {
@@ -182,7 +182,9 @@ export default function StackDetailScreen() {
           {/* Brainstorm capture */}
           <View className="px-4 mb-2">
             <SectionHeading
-              icon={<FileText size={14} color={isDark ? '#fbbf24' : '#b45309'} />}
+              icon={
+                <FileText size={14} color={isDark ? '#fbbf24' : '#b45309'} />
+              }
               label="Brainstorm"
               hint="Drop unstructured thoughts. Refine later."
             />
@@ -240,7 +242,9 @@ export default function StackDetailScreen() {
           {/* Organize — list of items, manual reorder */}
           <View className="px-4 mb-2 mt-3">
             <SectionHeading
-              icon={<ArrowUp size={14} color={isDark ? '#fbbf24' : '#b45309'} />}
+              icon={
+                <ArrowUp size={14} color={isDark ? '#fbbf24' : '#b45309'} />
+              }
               label="Organize"
               hint="Drag the order. The app won't suggest one."
             />
@@ -262,8 +266,8 @@ export default function StackDetailScreen() {
                 onMoveUp={() => onMove(idx, -1)}
                 onMoveDown={() => onMove(idx, 1)}
                 onRemove={() => onRemoveItem(item)}
-                onChangeNoteBody={(b) => updateNoteBody(item.id, b)}
-                onChangeThought={(t) => updateThought(item.id, t)}
+                onChangeNoteBody={b => updateNoteBody(item.id, b)}
+                onChangeThought={t => updateVerseThought(item.id, t)}
               />
             ))
           )}
@@ -344,7 +348,7 @@ function ItemCard({
           className="ml-2 flex-1 text-sm font-semibold text-neutral-700 dark:text-neutral-200"
           numberOfLines={1}
         >
-          {item.kind === 'verse' ? item.reference : 'Note'}
+          {item.headline}
         </Text>
         <AnimatedPressable
           onPress={onMoveUp}
@@ -372,11 +376,28 @@ function ItemCard({
       </View>
 
       {item.kind === 'verse' ? (
-        <View className="px-4 py-3">
-          <Text className="text-base text-neutral-900 dark:text-neutral-100 leading-6">
-            {item.text}
-          </Text>
-        </View>
+        <>
+          <View className="px-4 py-3">
+            <Text className="text-base text-neutral-900 dark:text-neutral-100 leading-6">
+              {item.verseText}
+            </Text>
+          </View>
+          <View className="px-3 pb-3 pt-1 border-t border-neutral-100 dark:border-neutral-700">
+            <Text className="text-xs uppercase tracking-wider font-semibold text-neutral-500 dark:text-neutral-400 mb-1 mt-2">
+              Your thought
+            </Text>
+            <TextInput
+              value={item.thought}
+              onChangeText={onChangeThought}
+              placeholder="Why does this belong in the talk?"
+              placeholderTextColor={isDark ? '#737373' : '#a3a3a3'}
+              multiline
+              textAlignVertical="top"
+              className="text-base text-neutral-900 dark:text-white"
+              style={{minHeight: 50}}
+            />
+          </View>
+        </>
       ) : (
         <View className="px-3 py-2">
           <TextInput
@@ -391,22 +412,6 @@ function ItemCard({
           />
         </View>
       )}
-
-      <View className="px-3 pb-3 pt-1 border-t border-neutral-100 dark:border-neutral-700">
-        <Text className="text-xs uppercase tracking-wider font-semibold text-neutral-500 dark:text-neutral-400 mb-1 mt-2">
-          Your thought
-        </Text>
-        <TextInput
-          value={item.thought}
-          onChangeText={onChangeThought}
-          placeholder="Why does this belong in the talk?"
-          placeholderTextColor={isDark ? '#737373' : '#a3a3a3'}
-          multiline
-          textAlignVertical="top"
-          className="text-base text-neutral-900 dark:text-white"
-          style={{minHeight: 50}}
-        />
-      </View>
     </View>
   );
 }

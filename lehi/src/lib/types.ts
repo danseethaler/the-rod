@@ -47,19 +47,35 @@ export type StackItem = StackItemVerse | StackItemNote;
 export interface StackItemBase {
   id: string;
   stackId: string;
-  /** Free-text "your thought" — the Enrich-stage field. */
-  thought: string;
+  /**
+   * User-editable label shown as the section heading on export and as the
+   * item title in the stack detail view. Defaulted from the item's content
+   * (verse → reference, note → first line of body) but the user can
+   * override it.
+   */
+  headline: string;
   createdAt: number;
 }
 
 export interface StackItemVerse extends StackItemBase {
   kind: 'verse';
   reference: string;
-  text: string;
   url: string;
+  /** The scripture text itself — what shows in the blockquote. */
+  verseText: string;
+  /**
+   * Free-text "your thought" — the Enrich-stage commentary on the verse.
+   * Verses keep this as a separate field because the verse text is bounded
+   * scripture, distinct from the user's reflection on it.
+   */
+  thought: string;
 }
 
 export interface StackItemNote extends StackItemBase {
   kind: 'note';
+  /**
+   * Free-text body. A note IS the user's thought — there is no separate
+   * thought field on notes.
+   */
   body: string;
 }
