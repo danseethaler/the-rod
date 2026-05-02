@@ -1,16 +1,10 @@
 import {useLocalSearchParams, useRouter} from 'expo-router';
 import {
-  ArrowDown,
-  ArrowUp,
   Bold,
   CheckCircle2,
   Circle,
-  FileText,
   Highlighter,
   Italic,
-  Plus,
-  Quote,
-  RotateCcw,
   Scissors,
   Send,
   SquareDashed,
@@ -19,22 +13,24 @@ import {
   X,
 } from 'lucide-react-native';
 import {useColorScheme} from 'nativewind';
-import React, {useCallback, useMemo, useState} from 'react';
-import {Alert, ScrollView, Text, TextInput, View} from 'react-native';
+import React, {useCallback, useMemo, useRef, useState} from 'react';
+import {Alert, ScrollView, Text, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
+import Sortable from 'react-native-sortables';
 
 import {AnimatedPressable} from '@/components/AnimatedPressable';
 import {
-  EditableVerseText,
   selectionToCharRange,
   type VerseSelection,
 } from '@/components/EditableVerseText';
 import {RodKeyboardAvoidingView} from '@/components/RodKeyboardAvoidingView';
 import {ScreenHeader} from '@/components/ScreenHeader';
+import {StackActionFab} from '@/components/StackActionFab';
+import {StackExpandedItem} from '@/components/StackExpandedItem';
+import {StackOutlineRow} from '@/components/StackOutlineRow';
 import {hapticLight, hapticSuccess} from '@/lib/haptics';
-import {getCanonicalVerseText} from '@/lib/scripture';
 import {toast} from '@/lib/toast';
-import type {StackItem, StackItemVerse, VerseRef} from '@/lib/types';
+import type {StackItem, StackItemVerse} from '@/lib/types';
 import {
   keepOnlyRange,
   parseVerseMarkdown,
@@ -70,21 +66,23 @@ export default function StackDetailScreen() {
   const setStackStatus = useStacksStore(s => s.setStackStatus);
   const deleteStack = useStacksStore(s => s.deleteStack);
   const reorderItems = useStacksStore(s => s.reorderItems);
-  const addNoteToStack = useStacksStore(s => s.addNoteToStack);
   const removeItem = useStacksStore(s => s.removeItem);
   const updateNoteBody = useStacksStore(s => s.updateNoteBody);
   const updateVerseThought = useStacksStore(s => s.updateVerseThought);
+  const updateHeadline = useStacksStore(s => s.updateHeadline);
   const updateVerseText = useStacksStore(s => s.updateVerseText);
   const resetVerseText = useStacksStore(s => s.resetVerseText);
 
-  const [draftNote, setDraftNote] = useState('');
-  const [activeSelection, setActiveSelection] = useState<ActiveSelection | null>(null);
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
+  const [activeSelection, setActiveSelection] =
+    useState<ActiveSelection | null>(null);
 
-  // Stable callbacks for the per-item selection / reset paths — must be
-  // declared before the early return below so the hook order stays
-  // consistent across renders. Without useCallback these would be
-  // re-created every render, defeating React.memo on the item / verse
-  // components downstream.
+  // Tracks whether a drag was active in the last ~250ms so we can ignore
+  // a press that fires immediately after a drag-without-movement (the
+  // user holds the row, the drag activates, then they release in place —
+  // that's a "drag" we don't want misread as a tap-to-expand).
+  const dragRecentlyActiveRef = useRef(false);
+
   const onItemSelectionChange = useCallback(
     (itemId: string, verseNumber: number, sel: VerseSelection | null) => {
       if (sel == null) {
@@ -150,21 +148,8 @@ export default function StackDetailScreen() {
   };
 
   const onCaptureNote = () => {
-    const body = draftNote.trim();
-    if (!body) return;
-    hapticSuccess();
-    addNoteToStack(stack.id, body);
-    setDraftNote('');
-    toast({title: 'Captured', preset: 'done'});
-  };
-
-  const onMove = (idx: number, dir: -1 | 1) => {
-    const newOrder = [...stack.itemIds];
-    const target = idx + dir;
-    if (target < 0 || target >= newOrder.length) return;
-    [newOrder[idx], newOrder[target]] = [newOrder[target], newOrder[idx]];
     hapticLight();
-    reorderItems(stack.id, newOrder);
+    router.push({pathname: '/stack/[id]/capture', params: {id: stack.id}});
   };
 
   const onToggleStatus = () => {
@@ -209,10 +194,31 @@ export default function StackDetailScreen() {
       {
         text: 'Remove',
         style: 'destructive',
-        onPress: () => removeItem(item.id),
+        onPress: () => {
+          removeItem(item.id);
+          if (expandedItemId === item.id) setExpandedItemId(null);
+          if (activeSelection?.itemId === item.id) setActiveSelection(null);
+          hapticSuccess();
+        },
       },
     ]);
   };
+
+  const onToggleExpand = (itemId: string) => {
+    if (dragRecentlyActiveRef.current) return;
+    hapticLight();
+    if (expandedItemId === itemId) {
+      // Collapsing — clear the format selection, since it belongs to a
+      // verse inside the card that's about to disappear.
+      setExpandedItemId(null);
+      setActiveSelection(null);
+    } else {
+      setExpandedItemId(itemId);
+    }
+  };
+
+  const isFormatBarVisible = activeSelection != null;
+  const isDragEnabled = expandedItemId == null;
 
   return (
     <SafeAreaView
@@ -233,13 +239,13 @@ export default function StackDetailScreen() {
         }
       />
 
-      <RodKeyboardAvoidingView keyboardVerticalOffset={0}>
+      <RodKeyboardAvoidingView>
         <ScrollView
-          contentContainerStyle={{paddingBottom: 32}}
+          contentContainerStyle={{paddingBottom: 120}}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Status + actions card */}
-          <View className="mx-4 mb-4 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 overflow-hidden">
+          {/* Status + count */}
+          <View className="mx-4 mt-1 mb-4 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 overflow-hidden">
             <AnimatedPressable
               onPress={onToggleStatus}
               className="flex-row items-center px-4 py-3"
@@ -258,118 +264,89 @@ export default function StackDetailScreen() {
             </AnimatedPressable>
           </View>
 
-          {/* Brainstorm capture */}
-          <View className="px-4 mb-2">
-            <SectionHeading
-              icon={
-                <FileText size={14} color={isDark ? '#fbbf24' : '#b45309'} />
-              }
-              label="Brainstorm"
-              hint="Drop unstructured thoughts. Refine later."
-            />
-          </View>
-          <View className="mx-4 mb-3 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 overflow-hidden">
-            <TextInput
-              value={draftNote}
-              onChangeText={setDraftNote}
-              placeholder="A thought, an angle, a question…"
-              placeholderTextColor={isDark ? '#737373' : '#a3a3a3'}
-              multiline
-              textAlignVertical="top"
-              className="px-4 py-3 text-base text-neutral-900 dark:text-white"
-              style={{minHeight: 90}}
-            />
-            <View className="flex-row justify-end px-2 pb-2">
-              <AnimatedPressable
-                onPress={onCaptureNote}
-                disabled={!draftNote.trim()}
-                className="px-4 py-2 bg-brand-500 rounded-xl"
-                style={{opacity: draftNote.trim() ? 1 : 0.45}}
-              >
-                <Text className="text-white font-semibold text-sm">
-                  Capture
-                </Text>
-              </AnimatedPressable>
-            </View>
-          </View>
-
-          {/* Filter — invokes search-add-flow */}
-          <View className="px-4 mb-2 mt-3">
-            <SectionHeading
-              icon={<Quote size={14} color={isDark ? '#fbbf24' : '#b45309'} />}
-              label="Filter"
-              hint="Search the Standard Works. Add what resonates."
-            />
-          </View>
-          <AnimatedPressable
-            onPress={onAddVerse}
-            className="mx-4 mb-3 flex-row items-center bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 px-4 py-3"
-          >
-            <View className="w-9 h-9 rounded-full bg-brand-50 dark:bg-brand-900/40 items-center justify-center">
-              <Plus size={20} color={isDark ? '#fbbf24' : '#b45309'} />
-            </View>
-            <View className="flex-1 ml-3">
-              <Text className="text-base font-medium text-neutral-900 dark:text-white">
-                Add a verse
-              </Text>
-              <Text className="text-sm text-neutral-500 dark:text-neutral-400">
-                Search and pick from the Standard Works
-              </Text>
-            </View>
-          </AnimatedPressable>
-
-          {/* Organize — list of items, manual reorder */}
-          <View className="px-4 mb-2 mt-3">
-            <SectionHeading
-              icon={
-                <ArrowUp size={14} color={isDark ? '#fbbf24' : '#b45309'} />
-              }
-              label="Organize"
-              hint="Drag the order. The app won't suggest one."
-            />
-          </View>
-
           {items.length === 0 ? (
-            <View className="mx-4 mb-3 bg-white dark:bg-neutral-800 rounded-2xl border border-dashed border-neutral-200 dark:border-neutral-700 px-4 py-6 items-center">
-              <Text className="text-sm text-neutral-500 dark:text-neutral-400 text-center">
-                No items yet. Capture a thought above or add a verse.
+            <View className="mx-4 bg-white dark:bg-neutral-800 rounded-2xl border border-dashed border-neutral-200 dark:border-neutral-700 px-4 py-8 items-center">
+              <Text className="text-base font-semibold text-neutral-700 dark:text-neutral-200 text-center">
+                Nothing in this stack yet.
+              </Text>
+              <Text className="text-sm text-neutral-500 dark:text-neutral-400 mt-1 text-center leading-5">
+                Tap the floating button to add a verse or capture a thought.
               </Text>
             </View>
           ) : (
-            items.map((item, idx) => {
-              // Pass selection as primitives so React.memo on ItemCard /
-              // VerseRow / EditableVerseText can short-circuit when an
-              // unrelated verse owns the selection.
-              const ownsSelection = activeSelection?.itemId === item.id;
-              return (
-                <ItemCard
-                  key={item.id}
-                  item={item}
-                  index={idx}
-                  total={items.length}
-                  activeVerseNumber={
-                    ownsSelection ? activeSelection.verseNumber : null
-                  }
-                  activeStartToken={
-                    ownsSelection ? activeSelection.startToken : null
-                  }
-                  activeEndToken={
-                    ownsSelection ? activeSelection.endToken : null
-                  }
-                  onSelectionChange={onItemSelectionChange}
-                  onResetVerse={onItemResetVerse}
-                  onMoveUp={() => onMove(idx, -1)}
-                  onMoveDown={() => onMove(idx, 1)}
-                  onRemove={() => onRemoveItem(item)}
-                  onChangeNoteBody={b => updateNoteBody(item.id, b)}
-                  onChangeThought={t => updateVerseThought(item.id, t)}
-                />
-              );
-            })
+            <View className="px-4">
+              <Sortable.Grid
+                columns={1}
+                data={items}
+                keyExtractor={item => item.id}
+                rowGap={10}
+                sortEnabled={isDragEnabled}
+                dragActivationDelay={300}
+                hapticsEnabled
+                enableActiveItemSnap={false}
+                activeItemScale={1.04}
+                // Shadow is intentionally 0 — react-native-sortables renders
+                // the active item twice (once in its source slot with content
+                // hidden, once in a portal at the drag position). Both
+                // wrappers carry the same shadow, so when the dragged copy
+                // hovers near its source slot the two shadows overlap and
+                // read as a blurry doubled outline. Inactive-item fade
+                // (default 0.5 opacity on the rest of the list) is enough
+                // visual cue that something is being moved.
+                activeItemShadowOpacity={0}
+                onDragStart={() => {
+                  dragRecentlyActiveRef.current = true;
+                }}
+                onDragEnd={({data}) => {
+                  reorderItems(
+                    stack.id,
+                    data.map(i => i.id)
+                  );
+                  // Keep the guard up briefly so a press that fires
+                  // immediately after release doesn't trip onToggleExpand.
+                  setTimeout(() => {
+                    dragRecentlyActiveRef.current = false;
+                  }, 250);
+                }}
+                renderItem={({item}) =>
+                  expandedItemId === item.id ? (
+                    <StackExpandedItem
+                      item={item}
+                      activeVerseNumber={
+                        activeSelection?.itemId === item.id
+                          ? activeSelection.verseNumber
+                          : null
+                      }
+                      activeStartToken={
+                        activeSelection?.itemId === item.id
+                          ? activeSelection.startToken
+                          : null
+                      }
+                      activeEndToken={
+                        activeSelection?.itemId === item.id
+                          ? activeSelection.endToken
+                          : null
+                      }
+                      onSelectionChange={onItemSelectionChange}
+                      onResetVerse={onItemResetVerse}
+                      onChangeHeadline={h => updateHeadline(item.id, h)}
+                      onChangeNoteBody={b => updateNoteBody(item.id, b)}
+                      onChangeThought={t => updateVerseThought(item.id, t)}
+                      onRemove={() => onRemoveItem(item)}
+                      onCollapse={() => onToggleExpand(item.id)}
+                    />
+                  ) : (
+                    <StackOutlineRow
+                      item={item}
+                      onPress={() => onToggleExpand(item.id)}
+                    />
+                  )
+                }
+              />
+            </View>
           )}
 
-          {/* Danger zone */}
-          <View className="px-4 mt-6">
+          <View className="px-4 mt-8">
             <AnimatedPressable
               onPress={onDelete}
               className="flex-row items-center justify-center bg-red-50 dark:bg-red-900/20 rounded-2xl py-3"
@@ -383,22 +360,43 @@ export default function StackDetailScreen() {
         </ScrollView>
       </RodKeyboardAvoidingView>
 
+      <StackActionFab
+        hidden={isFormatBarVisible}
+        onAddVerse={onAddVerse}
+        onAddThought={onCaptureNote}
+      />
+
       {activeSelection && (
         <FormatActionBar
           selection={activeSelection}
           item={
-            items.find((i) => i.id === activeSelection.itemId) as
+            items.find(i => i.id === activeSelection.itemId) as
               | StackItemVerse
               | undefined
           }
-          onApply={(kind) => {
-            applyFormatToActiveSelection(activeSelection, items, kind, updateVerseText);
+          onApply={kind => {
+            applyFormatToActiveSelection(
+              activeSelection,
+              items,
+              kind,
+              updateVerseText
+            );
           }}
           onTrim={() => {
-            applyTrimToActiveSelection(activeSelection, items, updateVerseText, setActiveSelection);
+            applyTrimToActiveSelection(
+              activeSelection,
+              items,
+              updateVerseText,
+              setActiveSelection
+            );
           }}
           onKeepOnly={() => {
-            applyKeepOnlyToActiveSelection(activeSelection, items, updateVerseText, setActiveSelection);
+            applyKeepOnlyToActiveSelection(
+              activeSelection,
+              items,
+              updateVerseText,
+              setActiveSelection
+            );
           }}
           onDone={() => setActiveSelection(null)}
         />
@@ -407,239 +405,10 @@ export default function StackDetailScreen() {
   );
 }
 
-function SectionHeading({
-  icon,
-  label,
-  hint,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  hint: string;
-}) {
-  return (
-    <View>
-      <View className="flex-row items-center gap-1.5">
-        {icon}
-        <Text className="text-xs uppercase tracking-wider font-semibold text-brand-700 dark:text-brand-300">
-          {label}
-        </Text>
-      </View>
-      <Text className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-        {hint}
-      </Text>
-    </View>
-  );
-}
-
-interface ItemCardProps {
-  item: StackItem;
-  index: number;
-  total: number;
-  /** Verse number that owns the selection on THIS item, or null. */
-  activeVerseNumber: number | null;
-  activeStartToken: number | null;
-  activeEndToken: number | null;
-  onSelectionChange: (
-    itemId: string,
-    verseNumber: number,
-    sel: VerseSelection | null
-  ) => void;
-  onResetVerse: (itemId: string, verseNumber: number) => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  onRemove: () => void;
-  onChangeNoteBody: (b: string) => void;
-  onChangeThought: (t: string) => void;
-}
-
-const ItemCard = React.memo(function ItemCard({
-  item,
-  index,
-  total,
-  activeVerseNumber,
-  activeStartToken,
-  activeEndToken,
-  onSelectionChange,
-  onResetVerse,
-  onMoveUp,
-  onMoveDown,
-  onRemove,
-  onChangeNoteBody,
-  onChangeThought,
-}: ItemCardProps) {
-  const {colorScheme} = useColorScheme();
-  const isDark = colorScheme === 'dark';
-
-  return (
-    <View className="mx-4 mb-3 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 overflow-hidden">
-      <View className="flex-row items-center px-3 py-2 bg-neutral-50 dark:bg-neutral-900/40 border-b border-neutral-100 dark:border-neutral-700">
-        <View className="w-7 h-7 rounded-full bg-brand-50 dark:bg-brand-900/40 items-center justify-center">
-          <Text className="text-xs font-bold text-brand-700 dark:text-brand-300">
-            {index + 1}
-          </Text>
-        </View>
-        <Text
-          className="ml-2 flex-1 text-sm font-semibold text-neutral-700 dark:text-neutral-200"
-          numberOfLines={1}
-        >
-          {item.headline}
-        </Text>
-        <AnimatedPressable
-          onPress={onMoveUp}
-          disabled={index === 0}
-          className="w-9 h-9 items-center justify-center"
-          style={{opacity: index === 0 ? 0.3 : 1}}
-        >
-          <ArrowUp size={18} color={isDark ? '#fff' : '#171717'} />
-        </AnimatedPressable>
-        <AnimatedPressable
-          onPress={onMoveDown}
-          disabled={index === total - 1}
-          className="w-9 h-9 items-center justify-center"
-          style={{opacity: index === total - 1 ? 0.3 : 1}}
-        >
-          <ArrowDown size={18} color={isDark ? '#fff' : '#171717'} />
-        </AnimatedPressable>
-        <AnimatedPressable
-          onPress={onRemove}
-          className="w-9 h-9 items-center justify-center"
-          accessibilityLabel="Remove"
-        >
-          <Trash2 size={16} color={isDark ? '#fca5a5' : '#dc2626'} />
-        </AnimatedPressable>
-      </View>
-
-      {item.kind === 'verse' ? (
-        <>
-          <View className="px-4 py-3" style={{rowGap: 12}}>
-            {item.verses.map((v) => {
-              const owns = activeVerseNumber === v.verse;
-              return (
-                <VerseRow
-                  key={v.verse}
-                  item={item}
-                  verse={v}
-                  startToken={owns ? activeStartToken : null}
-                  endToken={owns ? activeEndToken : null}
-                  onSelectionChange={onSelectionChange}
-                  onResetVerse={onResetVerse}
-                />
-              );
-            })}
-          </View>
-          <View className="px-3 pb-3 pt-1 border-t border-neutral-100 dark:border-neutral-700">
-            <Text className="text-xs uppercase tracking-wider font-semibold text-neutral-500 dark:text-neutral-400 mb-1 mt-2">
-              Your thought
-            </Text>
-            <TextInput
-              value={item.thought}
-              onChangeText={onChangeThought}
-              placeholder="Why does this belong in the talk?"
-              placeholderTextColor={isDark ? '#737373' : '#a3a3a3'}
-              multiline
-              textAlignVertical="top"
-              className="text-base text-neutral-900 dark:text-white"
-              style={{minHeight: 50}}
-            />
-          </View>
-        </>
-      ) : (
-        <View className="px-3 py-2">
-          <TextInput
-            value={item.body}
-            onChangeText={onChangeNoteBody}
-            placeholder="Write the note…"
-            placeholderTextColor={isDark ? '#737373' : '#a3a3a3'}
-            multiline
-            textAlignVertical="top"
-            className="px-1 py-1 text-base text-neutral-900 dark:text-white"
-            style={{minHeight: 60}}
-          />
-        </View>
-      )}
-    </View>
-  );
-});
-
 // ---------------------------------------------------------------------------
-// Per-verse row + bottom action bar for inline formatting & trim
+// Format action bar — appears when text inside an expanded verse item is
+// selected. Floats above the FAB; the FAB is hidden while this is visible.
 // ---------------------------------------------------------------------------
-
-interface VerseRowProps {
-  item: StackItemVerse;
-  verse: VerseRef;
-  /** Token indices when this verse owns the selection, else null. */
-  startToken: number | null;
-  endToken: number | null;
-  onSelectionChange: (
-    itemId: string,
-    verseNumber: number,
-    sel: VerseSelection | null
-  ) => void;
-  onResetVerse: (itemId: string, verseNumber: number) => void;
-}
-
-const VerseRow = React.memo(function VerseRow({
-  item,
-  verse,
-  startToken,
-  endToken,
-  onSelectionChange,
-  onResetVerse,
-}: VerseRowProps) {
-  const {colorScheme} = useColorScheme();
-  const isDark = colorScheme === 'dark';
-
-  const isEdited = useMemo(() => {
-    const canonical = getCanonicalVerseText(
-      item.standardWorkSlug,
-      item.bookSlug,
-      item.chapter,
-      verse.verse
-    );
-    return canonical != null && verse.text !== canonical;
-  }, [item.standardWorkSlug, item.bookSlug, item.chapter, verse.verse, verse.text]);
-
-  const handleEditorSelection = useCallback(
-    (next: VerseSelection | null) => {
-      onSelectionChange(item.id, verse.verse, next);
-    },
-    [onSelectionChange, item.id, verse.verse]
-  );
-
-  const handleReset = useCallback(() => {
-    onResetVerse(item.id, verse.verse);
-  }, [onResetVerse, item.id, verse.verse]);
-
-  return (
-    <View className="flex-row">
-      <Text className="text-sm font-semibold text-brand-600 dark:text-brand-400 w-7 mt-0.5">
-        {verse.verse}
-      </Text>
-      <View className="flex-1 flex-row items-start">
-        <View className="flex-1">
-          <EditableVerseText
-            itemId={item.id}
-            verseNumber={verse.verse}
-            markdown={verse.text}
-            startToken={startToken}
-            endToken={endToken}
-            onSelectionChange={handleEditorSelection}
-          />
-        </View>
-        {isEdited && (
-          <AnimatedPressable
-            onPress={handleReset}
-            className="ml-2 mt-0.5 w-7 h-7 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-700"
-            accessibilityLabel={`Reset verse ${verse.verse}`}
-          >
-            <RotateCcw size={14} color={isDark ? '#a3a3a3' : '#737373'} />
-          </AnimatedPressable>
-        )}
-      </View>
-    </View>
-  );
-});
 
 function FormatActionBar({
   selection,
@@ -676,15 +445,23 @@ function FormatActionBar({
     return {
       bold: rangeHasFormat(parsed, charRange.start, charRange.end, 'bold'),
       italic: rangeHasFormat(parsed, charRange.start, charRange.end, 'italic'),
-      underline: rangeHasFormat(parsed, charRange.start, charRange.end, 'underline'),
-      highlight: rangeHasFormat(parsed, charRange.start, charRange.end, 'highlight'),
+      underline: rangeHasFormat(
+        parsed,
+        charRange.start,
+        charRange.end,
+        'underline'
+      ),
+      highlight: rangeHasFormat(
+        parsed,
+        charRange.start,
+        charRange.end,
+        'highlight'
+      ),
     };
   }, [verseRef, charRange]);
 
   if (!verseRef || !charRange) return null;
 
-  // Floating card: lifted off the bottom edge, rounded, shadowed, with
-  // generous padding inside so the controls breathe.
   return (
     <View
       className="absolute left-3 right-3 bottom-6 rounded-3xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700"
@@ -696,7 +473,6 @@ function FormatActionBar({
         elevation: 16,
       }}
     >
-      {/* Header row: title + close */}
       <View className="flex-row items-center px-4 pt-3 pb-1">
         <Text className="text-xs uppercase tracking-wider font-semibold text-neutral-500 dark:text-neutral-400 flex-1">
           Verse {selection.verseNumber}
@@ -710,7 +486,6 @@ function FormatActionBar({
         </AnimatedPressable>
       </View>
 
-      {/* Format row */}
       <View
         className="flex-row items-stretch px-3 pt-1 pb-2"
         style={{columnGap: 8}}
@@ -722,29 +497,39 @@ function FormatActionBar({
           onPress={() => onApply('bold')}
         />
         <FormatButton
-          icon={<Italic size={20} color={iconColor(activeStates.italic, isDark)} />}
+          icon={
+            <Italic size={20} color={iconColor(activeStates.italic, isDark)} />
+          }
           label="Italic"
           active={activeStates.italic}
           onPress={() => onApply('italic')}
         />
         <FormatButton
-          icon={<Underline size={20} color={iconColor(activeStates.underline, isDark)} />}
+          icon={
+            <Underline
+              size={20}
+              color={iconColor(activeStates.underline, isDark)}
+            />
+          }
           label="Underline"
           active={activeStates.underline}
           onPress={() => onApply('underline')}
         />
         <FormatButton
-          icon={<Highlighter size={20} color={iconColor(activeStates.highlight, isDark)} />}
+          icon={
+            <Highlighter
+              size={20}
+              color={iconColor(activeStates.highlight, isDark)}
+            />
+          }
           label="Highlight"
           active={activeStates.highlight}
           onPress={() => onApply('highlight')}
         />
       </View>
 
-      {/* Divider */}
       <View className="h-px bg-neutral-200 dark:bg-neutral-700 mx-4" />
 
-      {/* Trim row */}
       <View
         className="flex-row items-stretch px-3 pt-3 pb-3"
         style={{columnGap: 8}}
@@ -756,7 +541,9 @@ function FormatActionBar({
           onPress={onTrim}
         />
         <TrimButton
-          icon={<SquareDashed size={18} color={isDark ? '#fbbf24' : '#b45309'} />}
+          icon={
+            <SquareDashed size={18} color={isDark ? '#fbbf24' : '#b45309'} />
+          }
           label="Keep only this"
           sublabel="Trim everything else"
           onPress={onKeepOnly}
@@ -790,9 +577,7 @@ function FormatButton({
       {icon}
       <Text
         className={`text-[11px] mt-1 font-medium ${
-          active
-            ? 'text-white'
-            : 'text-neutral-700 dark:text-neutral-200'
+          active ? 'text-white' : 'text-neutral-700 dark:text-neutral-200'
         }`}
       >
         {label}
@@ -882,8 +667,6 @@ function applyTrimToActiveSelection(
   const parsed = parseVerseMarkdown(verseRef.text);
   const next = trimRange(parsed, range.start, range.end);
   updateVerseText(item.id, verseRef.verse, serializeVerseMarkdown(next));
-  // Trim changes token indices — clear selection so the user re-selects
-  // intentionally.
   setActiveSelection(null);
 }
 

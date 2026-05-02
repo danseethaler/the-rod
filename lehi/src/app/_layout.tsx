@@ -72,6 +72,14 @@ export default function RootLayout() {
                   sheetAllowedDetents: 'fitToContents' as never,
                 }}
               />
+              <Stack.Screen
+                name="stack/[id]/capture"
+                options={{
+                  headerShown: false,
+                  presentation: 'formSheet',
+                  animation: 'slide_from_bottom',
+                }}
+              />
               <Stack.Screen name="about" options={{headerShown: false}} />
               <Stack.Screen
                 name="import-preview"
