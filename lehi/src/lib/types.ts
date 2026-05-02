@@ -27,9 +27,27 @@ export interface Stack {
   title: string;
   // "Bake until done" status — Dan's own language from Speaking Principles.
   status: StackStatus;
-  itemIds: string[]; // ordered manually by the user
+  /** Ordered list of section IDs. A stack always has at least one section. */
+  sectionIds: string[];
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * A Section groups items within a stack — typically the introduction, a
+ * principle, another principle, etc. Mirrors Bear's H2 structure for talks.
+ *
+ * `body` is the optional paragraph that lives directly under the section's
+ * H2 heading, before any items. Empty string means "no description".
+ */
+export interface Section {
+  id: string;
+  stackId: string;
+  title: string;
+  body: string;
+  /** Ordered list of item IDs belonging to this section. */
+  itemIds: string[];
+  createdAt: number;
 }
 
 export type StackStatus = 'baking' | 'done' | 'archived';

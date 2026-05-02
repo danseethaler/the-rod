@@ -1,10 +1,15 @@
+import * as Clipboard from 'expo-clipboard';
 import {useLocalSearchParams, useRouter} from 'expo-router';
 import {
   Bold,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Circle,
+  ClipboardPaste,
   Highlighter,
   Italic,
+  Plus,
   Scissors,
   Send,
   SquareDashed,
@@ -14,7 +19,7 @@ import {
 } from 'lucide-react-native';
 import {useColorScheme} from 'nativewind';
 import React, {useCallback, useMemo, useRef, useState} from 'react';
-import {Alert, ScrollView, Text, View} from 'react-native';
+import {Alert, ScrollView, Text, TextInput, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import Sortable from 'react-native-sortables';
 
@@ -28,9 +33,10 @@ import {ScreenHeader} from '@/components/ScreenHeader';
 import {StackActionFab} from '@/components/StackActionFab';
 import {StackExpandedItem} from '@/components/StackExpandedItem';
 import {StackOutlineRow} from '@/components/StackOutlineRow';
-import {hapticLight, hapticSuccess} from '@/lib/haptics';
+import {hapticError, hapticLight, hapticSuccess} from '@/lib/haptics';
+import {MarkdownParseError} from '@/lib/markdown';
 import {toast} from '@/lib/toast';
-import type {StackItem, StackItemVerse} from '@/lib/types';
+import type {Section, StackItem, StackItemVerse} from '@/lib/types';
 import {
   keepOnlyRange,
   parseVerseMarkdown,
@@ -41,7 +47,8 @@ import {
   type FormatKind,
 } from '@/lib/verseFormat';
 import {
-  resolveStackItems,
+  resolveSectionItems,
+  resolveStackSections,
   selectStackById,
   useStacksStore,
 } from '@/store/useStacksStore';
@@ -58,29 +65,36 @@ export default function StackDetailScreen() {
   const isDark = colorScheme === 'dark';
 
   const stack = useStacksStore(selectStackById(id));
+  const allSections = useStacksStore(s => s.sections);
   const allItems = useStacksStore(s => s.items);
-  const items = useMemo(
-    () => resolveStackItems(stack, allItems),
-    [stack, allItems]
+  const sections = useMemo(
+    () => resolveStackSections(stack, allSections),
+    [stack, allSections]
   );
   const setStackStatus = useStacksStore(s => s.setStackStatus);
   const deleteStack = useStacksStore(s => s.deleteStack);
-  const reorderItems = useStacksStore(s => s.reorderItems);
+  const reorderSections = useStacksStore(s => s.reorderSections);
+  const reorderItemsInSection = useStacksStore(s => s.reorderItemsInSection);
   const removeItem = useStacksStore(s => s.removeItem);
   const updateNoteBody = useStacksStore(s => s.updateNoteBody);
   const updateVerseThought = useStacksStore(s => s.updateVerseThought);
   const updateHeadline = useStacksStore(s => s.updateHeadline);
   const updateVerseText = useStacksStore(s => s.updateVerseText);
   const resetVerseText = useStacksStore(s => s.resetVerseText);
+  const renameSection = useStacksStore(s => s.renameSection);
+  const setSectionBody = useStacksStore(s => s.setSectionBody);
+  const deleteSection = useStacksStore(s => s.deleteSection);
+  const createSection = useStacksStore(s => s.createSection);
+  const previewReplace = useStacksStore(s => s.previewReplace);
+  const setPendingImport = useStacksStore(s => s.setPendingImport);
 
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
+  const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(
+    new Set()
+  );
   const [activeSelection, setActiveSelection] =
     useState<ActiveSelection | null>(null);
 
-  // Tracks whether a drag was active in the last ~250ms so we can ignore
-  // a press that fires immediately after a drag-without-movement (the
-  // user holds the row, the drag activates, then they release in place —
-  // that's a "drag" we don't want misread as a tap-to-expand).
   const dragRecentlyActiveRef = useRef(false);
 
   const onItemSelectionChange = useCallback(
@@ -142,6 +156,8 @@ export default function StackDetailScreen() {
     );
   }
 
+  const itemCount = sections.reduce((acc, s) => acc + s.itemIds.length, 0);
+
   const onAddVerse = () => {
     hapticLight();
     router.push({pathname: '/stack/[id]/add', params: {id: stack.id}});
@@ -150,6 +166,35 @@ export default function StackDetailScreen() {
   const onCaptureNote = () => {
     hapticLight();
     router.push({pathname: '/stack/[id]/capture', params: {id: stack.id}});
+  };
+
+  const onAddSection = () => {
+    hapticLight();
+    createSection(stack.id);
+  };
+
+  const onReplaceFromClipboard = async () => {
+    hapticLight();
+    const md = await Clipboard.getStringAsync();
+    if (!md.trim()) {
+      hapticError();
+      toast({title: 'Clipboard is empty', preset: 'error'});
+      return;
+    }
+    try {
+      const preview = previewReplace(md, stack.id);
+      setPendingImport(preview);
+      router.push({pathname: '/import-preview' as never});
+    } catch (err) {
+      hapticError();
+      toast({
+        title:
+          err instanceof MarkdownParseError
+            ? err.message
+            : 'Could not parse markdown',
+        preset: 'error',
+      });
+    }
   };
 
   const onToggleStatus = () => {
@@ -204,12 +249,48 @@ export default function StackDetailScreen() {
     ]);
   };
 
+  const onDeleteSection = (section: Section) => {
+    if (sections.length <= 1) {
+      toast({title: 'A stack needs at least one section', preset: 'error'});
+      return;
+    }
+    Alert.alert(
+      'Delete section?',
+      `"${section.title.trim() || 'Untitled section'}" and its ${section.itemIds.length} item${section.itemIds.length === 1 ? '' : 's'} will be permanently removed.`,
+      [
+        {text: 'Cancel', style: 'cancel'},
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            deleteSection(section.id);
+            setCollapsedSectionIds(prev => {
+              if (!prev.has(section.id)) return prev;
+              const next = new Set(prev);
+              next.delete(section.id);
+              return next;
+            });
+            hapticSuccess();
+          },
+        },
+      ]
+    );
+  };
+
+  const onToggleCollapseSection = (sectionId: string) => {
+    hapticLight();
+    setCollapsedSectionIds(prev => {
+      const next = new Set(prev);
+      if (next.has(sectionId)) next.delete(sectionId);
+      else next.add(sectionId);
+      return next;
+    });
+  };
+
   const onToggleExpand = (itemId: string) => {
     if (dragRecentlyActiveRef.current) return;
     hapticLight();
     if (expandedItemId === itemId) {
-      // Collapsing — clear the format selection, since it belongs to a
-      // verse inside the card that's about to disappear.
       setExpandedItemId(null);
       setActiveSelection(null);
     } else {
@@ -218,7 +299,7 @@ export default function StackDetailScreen() {
   };
 
   const isFormatBarVisible = activeSelection != null;
-  const isDragEnabled = expandedItemId == null;
+  const isSectionDragEnabled = expandedItemId == null;
 
   return (
     <SafeAreaView
@@ -229,19 +310,28 @@ export default function StackDetailScreen() {
         title={stack.title}
         leading="back"
         trailing={
-          <AnimatedPressable
-            onPress={onExport}
-            className="w-10 h-10 items-center justify-center -mr-2"
-            accessibilityLabel="Export stack"
-          >
-            <Send size={22} color={isDark ? '#fff' : '#171717'} />
-          </AnimatedPressable>
+          <View className="flex-row items-center -mr-2">
+            <AnimatedPressable
+              onPress={onReplaceFromClipboard}
+              className="w-10 h-10 items-center justify-center"
+              accessibilityLabel="Replace from clipboard"
+            >
+              <ClipboardPaste size={20} color={isDark ? '#fff' : '#171717'} />
+            </AnimatedPressable>
+            <AnimatedPressable
+              onPress={onExport}
+              className="w-10 h-10 items-center justify-center"
+              accessibilityLabel="Export stack"
+            >
+              <Send size={20} color={isDark ? '#fff' : '#171717'} />
+            </AnimatedPressable>
+          </View>
         }
       />
 
       <RodKeyboardAvoidingView>
         <ScrollView
-          contentContainerStyle={{paddingBottom: 120}}
+          contentContainerStyle={{paddingBottom: 140}}
           keyboardShouldPersistTaps="handled"
         >
           {/* Status + count */}
@@ -259,54 +349,262 @@ export default function StackDetailScreen() {
                 {stack.status === 'done' ? 'Done' : 'Bake until done'}
               </Text>
               <Text className="ml-auto text-xs text-neutral-500 dark:text-neutral-400">
-                {items.length} item{items.length === 1 ? '' : 's'}
+                {itemCount} item{itemCount === 1 ? '' : 's'} · {sections.length}{' '}
+                section{sections.length === 1 ? '' : 's'}
               </Text>
             </AnimatedPressable>
           </View>
 
-          {items.length === 0 ? (
-            <View className="mx-4 bg-white dark:bg-neutral-800 rounded-2xl border border-dashed border-neutral-200 dark:border-neutral-700 px-4 py-8 items-center">
-              <Text className="text-base font-semibold text-neutral-700 dark:text-neutral-200 text-center">
-                Nothing in this stack yet.
+          <View className="px-4">
+            <Sortable.Grid
+              columns={1}
+              data={sections}
+              keyExtractor={s => s.id}
+              rowGap={12}
+              sortEnabled={isSectionDragEnabled}
+              dragActivationDelay={350}
+              hapticsEnabled
+              enableActiveItemSnap={false}
+              activeItemScale={1.02}
+              activeItemShadowOpacity={0}
+              onDragStart={() => {
+                dragRecentlyActiveRef.current = true;
+              }}
+              onDragEnd={({data}) => {
+                reorderSections(
+                  stack.id,
+                  data.map(s => s.id)
+                );
+                setTimeout(() => {
+                  dragRecentlyActiveRef.current = false;
+                }, 250);
+              }}
+              renderItem={({item: section}) => (
+                <SectionCard
+                  section={section}
+                  items={resolveSectionItems(section, allItems)}
+                  isCollapsed={collapsedSectionIds.has(section.id)}
+                  isOnlySection={sections.length === 1}
+                  expandedItemId={expandedItemId}
+                  activeSelection={activeSelection}
+                  onToggleCollapse={() => onToggleCollapseSection(section.id)}
+                  onRenameSection={t => renameSection(section.id, t)}
+                  onChangeBody={b => setSectionBody(section.id, b)}
+                  onDeleteSection={() => onDeleteSection(section)}
+                  onReorderItems={ids => reorderItemsInSection(section.id, ids)}
+                  onToggleExpandItem={onToggleExpand}
+                  onItemSelectionChange={onItemSelectionChange}
+                  onItemResetVerse={onItemResetVerse}
+                  onChangeHeadline={(itemId, h) => updateHeadline(itemId, h)}
+                  onChangeNoteBody={(itemId, b) => updateNoteBody(itemId, b)}
+                  onChangeThought={(itemId, t) => updateVerseThought(itemId, t)}
+                  onRemoveItem={onRemoveItem}
+                  isDark={isDark}
+                />
+              )}
+            />
+          </View>
+
+          <View className="px-4 mt-3">
+            <AnimatedPressable
+              onPress={onAddSection}
+              className="flex-row items-center justify-center gap-2 py-3 rounded-2xl border border-dashed border-neutral-300 dark:border-neutral-700"
+            >
+              <Plus size={16} color={isDark ? '#a3a3a3' : '#737373'} />
+              <Text className="text-sm font-medium text-neutral-600 dark:text-neutral-300">
+                Add section
               </Text>
-              <Text className="text-sm text-neutral-500 dark:text-neutral-400 mt-1 text-center leading-5">
-                Tap the floating button to add a verse or capture a thought.
+            </AnimatedPressable>
+          </View>
+
+          <View className="px-4 mt-8">
+            <AnimatedPressable
+              onPress={onDelete}
+              className="flex-row items-center justify-center bg-red-50 dark:bg-red-900/20 rounded-2xl py-3"
+            >
+              <Trash2 size={18} color={isDark ? '#fca5a5' : '#dc2626'} />
+              <Text className="ml-2 font-semibold text-red-600 dark:text-red-300">
+                Delete stack
+              </Text>
+            </AnimatedPressable>
+          </View>
+        </ScrollView>
+      </RodKeyboardAvoidingView>
+
+      <StackActionFab
+        hidden={isFormatBarVisible}
+        onAddSection={onAddSection}
+        onAddVerse={onAddVerse}
+        onAddThought={onCaptureNote}
+      />
+
+      {activeSelection && (
+        <FormatActionBar
+          selection={activeSelection}
+          item={
+            allItems.find(i => i.id === activeSelection.itemId) as
+              | StackItemVerse
+              | undefined
+          }
+          onApply={kind => {
+            applyFormatToActiveSelection(
+              activeSelection,
+              allItems,
+              kind,
+              updateVerseText
+            );
+          }}
+          onTrim={() => {
+            applyTrimToActiveSelection(
+              activeSelection,
+              allItems,
+              updateVerseText,
+              setActiveSelection
+            );
+          }}
+          onKeepOnly={() => {
+            applyKeepOnlyToActiveSelection(
+              activeSelection,
+              allItems,
+              updateVerseText,
+              setActiveSelection
+            );
+          }}
+          onDone={() => setActiveSelection(null)}
+        />
+      )}
+    </SafeAreaView>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Section card — header (collapsible, editable), inner sortable list of
+// items. The inner list is independent from the outer sections sortable.
+// ---------------------------------------------------------------------------
+
+interface SectionCardProps {
+  section: Section;
+  items: StackItem[];
+  isCollapsed: boolean;
+  isOnlySection: boolean;
+  expandedItemId: string | null;
+  activeSelection: ActiveSelection | null;
+  onToggleCollapse: () => void;
+  onRenameSection: (title: string) => void;
+  onChangeBody: (body: string) => void;
+  onDeleteSection: () => void;
+  onReorderItems: (newOrder: string[]) => void;
+  onToggleExpandItem: (itemId: string) => void;
+  onItemSelectionChange: (
+    itemId: string,
+    verseNumber: number,
+    sel: VerseSelection | null
+  ) => void;
+  onItemResetVerse: (itemId: string, verseNumber: number) => void;
+  onChangeHeadline: (itemId: string, headline: string) => void;
+  onChangeNoteBody: (itemId: string, body: string) => void;
+  onChangeThought: (itemId: string, thought: string) => void;
+  onRemoveItem: (item: StackItem) => void;
+  isDark: boolean;
+}
+
+function SectionCard({
+  section,
+  items,
+  isCollapsed,
+  isOnlySection,
+  expandedItemId,
+  activeSelection,
+  onToggleCollapse,
+  onRenameSection,
+  onChangeBody,
+  onDeleteSection,
+  onReorderItems,
+  onToggleExpandItem,
+  onItemSelectionChange,
+  onItemResetVerse,
+  onChangeHeadline,
+  onChangeNoteBody,
+  onChangeThought,
+  onRemoveItem,
+  isDark,
+}: SectionCardProps) {
+  const itemDragEnabled = expandedItemId == null;
+
+  return (
+    <View className="bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 overflow-hidden">
+      {/* Header row */}
+      <View className="flex-row items-center px-2 py-1.5 bg-neutral-50 dark:bg-neutral-900/40 border-b border-neutral-100 dark:border-neutral-700 gap-1">
+        <AnimatedPressable
+          onPress={onToggleCollapse}
+          className="w-9 h-9 items-center justify-center"
+          accessibilityLabel={
+            isCollapsed ? 'Expand section' : 'Collapse section'
+          }
+        >
+          {isCollapsed ? (
+            <ChevronRight size={18} color={isDark ? '#fff' : '#171717'} />
+          ) : (
+            <ChevronDown size={18} color={isDark ? '#fff' : '#171717'} />
+          )}
+        </AnimatedPressable>
+        <TextInput
+          value={section.title}
+          onChangeText={onRenameSection}
+          placeholder="Section title"
+          placeholderTextColor={isDark ? '#737373' : '#a3a3a3'}
+          className="flex-1 text-base font-semibold text-neutral-900 dark:text-white px-1"
+        />
+        <Text className="text-xs text-neutral-400 dark:text-neutral-500 mr-2">
+          {items.length}
+        </Text>
+        {!isOnlySection && (
+          <AnimatedPressable
+            onPress={onDeleteSection}
+            className="w-9 h-9 items-center justify-center"
+            accessibilityLabel="Delete section"
+          >
+            <Trash2 size={14} color={isDark ? '#fca5a5' : '#dc2626'} />
+          </AnimatedPressable>
+        )}
+      </View>
+
+      {!isCollapsed && (
+        <>
+          {/* Optional body description */}
+          <View className="px-3 pt-2 pb-1">
+            <TextInput
+              value={section.body}
+              onChangeText={onChangeBody}
+              placeholder="Optional description for this section"
+              placeholderTextColor={isDark ? '#737373' : '#a3a3a3'}
+              multiline
+              textAlignVertical="top"
+              className="text-sm text-neutral-700 dark:text-neutral-200 px-1"
+            />
+          </View>
+
+          {items.length === 0 ? (
+            <View className="px-4 py-4">
+              <Text className="text-xs text-neutral-400 dark:text-neutral-500 italic">
+                No items yet. Use the floating button to add a verse or thought.
               </Text>
             </View>
           ) : (
-            <View className="px-4">
+            <View className="px-2 py-2">
               <Sortable.Grid
                 columns={1}
                 data={items}
-                keyExtractor={item => item.id}
-                rowGap={10}
-                sortEnabled={isDragEnabled}
+                keyExtractor={i => i.id}
+                rowGap={8}
+                sortEnabled={itemDragEnabled}
                 dragActivationDelay={300}
                 hapticsEnabled
                 enableActiveItemSnap={false}
                 activeItemScale={1.04}
-                // Shadow is intentionally 0 — react-native-sortables renders
-                // the active item twice (once in its source slot with content
-                // hidden, once in a portal at the drag position). Both
-                // wrappers carry the same shadow, so when the dragged copy
-                // hovers near its source slot the two shadows overlap and
-                // read as a blurry doubled outline. Inactive-item fade
-                // (default 0.5 opacity on the rest of the list) is enough
-                // visual cue that something is being moved.
                 activeItemShadowOpacity={0}
-                onDragStart={() => {
-                  dragRecentlyActiveRef.current = true;
-                }}
                 onDragEnd={({data}) => {
-                  reorderItems(
-                    stack.id,
-                    data.map(i => i.id)
-                  );
-                  // Keep the guard up briefly so a press that fires
-                  // immediately after release doesn't trip onToggleExpand.
-                  setTimeout(() => {
-                    dragRecentlyActiveRef.current = false;
-                  }, 250);
+                  onReorderItems(data.map(i => i.id));
                 }}
                 renderItem={({item}) =>
                   expandedItemId === item.id ? (
@@ -329,85 +627,31 @@ export default function StackDetailScreen() {
                       }
                       onSelectionChange={onItemSelectionChange}
                       onResetVerse={onItemResetVerse}
-                      onChangeHeadline={h => updateHeadline(item.id, h)}
-                      onChangeNoteBody={b => updateNoteBody(item.id, b)}
-                      onChangeThought={t => updateVerseThought(item.id, t)}
+                      onChangeHeadline={h => onChangeHeadline(item.id, h)}
+                      onChangeNoteBody={b => onChangeNoteBody(item.id, b)}
+                      onChangeThought={t => onChangeThought(item.id, t)}
                       onRemove={() => onRemoveItem(item)}
-                      onCollapse={() => onToggleExpand(item.id)}
+                      onCollapse={() => onToggleExpandItem(item.id)}
                     />
                   ) : (
                     <StackOutlineRow
                       item={item}
-                      onPress={() => onToggleExpand(item.id)}
+                      onPress={() => onToggleExpandItem(item.id)}
                     />
                   )
                 }
               />
             </View>
           )}
-
-          <View className="px-4 mt-8">
-            <AnimatedPressable
-              onPress={onDelete}
-              className="flex-row items-center justify-center bg-red-50 dark:bg-red-900/20 rounded-2xl py-3"
-            >
-              <Trash2 size={18} color={isDark ? '#fca5a5' : '#dc2626'} />
-              <Text className="ml-2 font-semibold text-red-600 dark:text-red-300">
-                Delete stack
-              </Text>
-            </AnimatedPressable>
-          </View>
-        </ScrollView>
-      </RodKeyboardAvoidingView>
-
-      <StackActionFab
-        hidden={isFormatBarVisible}
-        onAddVerse={onAddVerse}
-        onAddThought={onCaptureNote}
-      />
-
-      {activeSelection && (
-        <FormatActionBar
-          selection={activeSelection}
-          item={
-            items.find(i => i.id === activeSelection.itemId) as
-              | StackItemVerse
-              | undefined
-          }
-          onApply={kind => {
-            applyFormatToActiveSelection(
-              activeSelection,
-              items,
-              kind,
-              updateVerseText
-            );
-          }}
-          onTrim={() => {
-            applyTrimToActiveSelection(
-              activeSelection,
-              items,
-              updateVerseText,
-              setActiveSelection
-            );
-          }}
-          onKeepOnly={() => {
-            applyKeepOnlyToActiveSelection(
-              activeSelection,
-              items,
-              updateVerseText,
-              setActiveSelection
-            );
-          }}
-          onDone={() => setActiveSelection(null)}
-        />
+        </>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Format action bar — appears when text inside an expanded verse item is
-// selected. Floats above the FAB; the FAB is hidden while this is visible.
+// selected.
 // ---------------------------------------------------------------------------
 
 function FormatActionBar({
@@ -624,9 +868,7 @@ function iconColor(active: boolean, isDark: boolean): string {
 }
 
 // ---------------------------------------------------------------------------
-// Selection action helpers — operate on the active selection by looking
-// up the current verse text from the items snapshot, applying the
-// transform, and writing the result back through the store.
+// Selection helpers (operating on items snapshot)
 // ---------------------------------------------------------------------------
 
 function applyFormatToActiveSelection(

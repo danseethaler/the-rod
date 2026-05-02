@@ -1,14 +1,5 @@
 import {buildMarkdownBlockquoteForSet} from '@/lib/scripture';
-import type {Stack, StackItem, VerseRef} from '@/lib/types';
-
-/**
- * Marker emitted at the top of every export, so a clipboard re-import can
- * round-trip back to the same stack instead of duplicating it.
- */
-const STACK_MARKER_RE = /<!--\s*krumb:stack:([^\s>]+)\s*-->/;
-
-/** Marker emitted before each `## ` heading, carrying the item's stable ID. */
-const ITEM_MARKER_RE = /<!--\s*krumb:item:([^\s>]+)\s*-->/;
+import type {Section, Stack, StackItem, VerseRef} from '@/lib/types';
 
 /**
  * Verse header line — `> [ref](url)` with no trailing text. The verse-set
@@ -17,9 +8,7 @@ const ITEM_MARKER_RE = /<!--\s*krumb:item:([^\s>]+)\s*-->/;
  */
 const VERSE_HEADER_RE = /^>\s*\[([^\]]+)\]\(([^)]+)\)\s*$/;
 
-/**
- * Per-verse blockquote line within a verse set: `> 7 — text` or `> 7. text`.
- */
+/** Per-verse blockquote line within a verse set: `> 7 — text` or `> 7. text`. */
 const VERSE_BODY_RE = /^>\s*(\d+)\s*[—\-.]\s*(.+)$/;
 
 /**
@@ -29,41 +18,81 @@ const VERSE_BODY_RE = /^>\s*(\d+)\s*[—\-.]\s*(.+)$/;
 const LEGACY_VERSE_LINE_RE = /^>\s*\[([^\]]+)\]\(([^)]+)\)\s*[—-]\s*(.+)$/;
 
 /**
- * Render a stack to Bear-friendly markdown. Output is layout-driven — no
- * body/thought markers — with two HTML-comment markers for round-trip
- * identity:
+ * Render a stack to Bear-friendly markdown. Format is pure heading-driven —
+ * no HTML-comment markers — so the output reads naturally inside Bear and
+ * round-trips by **title** alone.
  *
- *   <!-- krumb:stack:{stack-id} -->     emitted once at the top
- *   <!-- krumb:item:{item-id} -->       emitted before each `## ` heading
+ *   # Stack title
  *
- * Comments survive Bear and render as nothing visible.
+ *   ## Section title
+ *
+ *   Optional section description.
+ *
+ *   ### Item headline
+ *
+ *   > [Reference](url)
+ *   > 7 — verse text
+ *
+ *   Optional thought.
+ *
+ *   ### Another item
+ *
+ *   note body
  */
-export function stackToMarkdown(stack: Stack, items: StackItem[]): string {
-  const ordered = stack.itemIds
-    .map(id => items.find(i => i.id === id))
-    .filter((i): i is StackItem => i != null);
+export function stackToMarkdown(
+  stack: Stack,
+  sections: Section[],
+  items: StackItem[]
+): string {
+  const orderedSections = stack.sectionIds
+    .map(id => sections.find(s => s.id === id))
+    .filter((s): s is Section => s != null);
 
-  const parts: string[] = [
-    `<!-- krumb:stack:${stack.id} -->`,
-    `# ${stack.title}`,
-    '',
-  ];
+  const parts: string[] = [`# ${stack.title}`, ''];
 
-  ordered.forEach((item, index) => {
-    const headline = item.headline.trim() || `Item ${index + 1}`;
-    parts.push(`<!-- krumb:item:${item.id} -->`);
-    parts.push(`## ${headline}`, '');
-    if (item.kind === 'verse') {
-      parts.push(buildMarkdownBlockquoteForSet(item), '');
-      const thought = item.thought.trim();
-      if (thought) parts.push(thought, '');
-    } else {
-      const body = item.body.trim();
-      if (body) parts.push(body, '');
+  for (const section of orderedSections) {
+    parts.push(`## ${section.title.trim()}`, '');
+    const body = section.body.trim();
+    if (body) {
+      parts.push(body, '');
     }
-  });
+
+    const orderedItems = section.itemIds
+      .map(id => items.find(i => i.id === id))
+      .filter((i): i is StackItem => i != null);
+
+    for (const item of orderedItems) {
+      parts.push(itemToMarkdown(item));
+    }
+  }
 
   return parts.join('\n').trim() + '\n';
+}
+
+/**
+ * Serialize a single item the same way a full export does. Used by the
+ * per-item "Copy as markdown" action so the copy is a drop-in fragment
+ * of a full stack export.
+ */
+export function itemToMarkdown(item: StackItem): string {
+  const headline = item.headline.trim() || fallbackHeadline(item);
+  const parts: string[] = [`### ${headline}`, ''];
+
+  if (item.kind === 'verse') {
+    parts.push(buildMarkdownBlockquoteForSet(item), '');
+    const thought = item.thought.trim();
+    if (thought) parts.push(thought, '');
+  } else {
+    const body = item.body.trim();
+    if (body) parts.push(body, '');
+  }
+
+  return parts.join('\n');
+}
+
+function fallbackHeadline(item: StackItem): string {
+  if (item.kind === 'verse') return item.reference;
+  return 'Untitled note';
 }
 
 /**
@@ -86,56 +115,48 @@ export function bearCreateUrl(title: string, body: string): string {
 
 export interface ParsedVerseItem {
   kind: 'verse';
-  /** Item ID extracted from the round-trip marker, if present. */
-  sourceItemId?: string;
   headline: string;
   reference: string;
   url: string;
-  /**
-   * Sorted ascending by `verse`. Always non-empty for a parsed verse item.
-   * Legacy single-line markdown produces a one-element array with verse=1.
-   */
+  /** Sorted ascending by `verse`. Always non-empty for a parsed verse item. */
   verses: VerseRef[];
   thought: string;
 }
 
 export interface ParsedNoteItem {
   kind: 'note';
-  /** Item ID extracted from the round-trip marker, if present. */
-  sourceItemId?: string;
   headline: string;
   body: string;
 }
 
 export type ParsedStackItem = ParsedVerseItem | ParsedNoteItem;
 
-export interface ParsedStack {
-  /** Stack ID extracted from the round-trip marker, if present. */
-  sourceId?: string;
+export interface ParsedSection {
   title: string;
+  body: string;
   items: ParsedStackItem[];
+}
+
+export interface ParsedStack {
+  title: string;
+  sections: ParsedSection[];
 }
 
 export class MarkdownParseError extends Error {}
 
 /**
- * Parse markdown back into a stack shape. Accepts both Krumb-emitted markdown
- * (with markers) and lightly-edited Bear notes that follow the same shape.
+ * Parse markdown back into a stack shape. Pure heading-driven — H1 = stack
+ * title, H2 = section, H3 = item. Sections own a body paragraph (anything
+ * between the H2 line and the first H3); items own their content (verse
+ * blockquote + optional thought, or free-text note body).
  *
- * Required:
- *  - At least one `# Title` line.
- *
- * Optional:
- *  - `<!-- krumb:stack:{id} -->` for stack-level identity.
- *  - `<!-- krumb:item:{id} -->` for per-item identity (used by the diff
- *    preview and to preserve `createdAt` across a round-trip).
+ * If the markdown has H3s before any H2, the parser auto-creates a single
+ * anonymous section to hold them. Markdown with no H1 throws.
  */
 export function markdownToStack(md: string): ParsedStack {
   if (!md || !md.trim()) {
     throw new MarkdownParseError('Clipboard is empty.');
   }
-
-  const sourceId = STACK_MARKER_RE.exec(md)?.[1];
 
   const titleMatch = md.match(/^#\s+(.+)$/m);
   if (!titleMatch) {
@@ -144,59 +165,73 @@ export function markdownToStack(md: string): ParsedStack {
     );
   }
   const title = titleMatch[1].trim();
-
   const afterTitle = md.slice((titleMatch.index ?? 0) + titleMatch[0].length);
 
-  // Split by `## ` headings — those are item boundaries.
-  const sectionMatches = Array.from(afterTitle.matchAll(/^##\s+(.+)$/gm));
+  const sectionMatches = Array.from(afterTitle.matchAll(/^##\s+(.*)$/gm));
+  const sections: ParsedSection[] = [];
 
-  const items: ParsedStackItem[] = [];
-
-  for (let i = 0; i < sectionMatches.length; i += 1) {
-    const m = sectionMatches[i];
-    const sectionStart = (m.index ?? 0) + m[0].length;
-    const sectionEnd =
-      i + 1 < sectionMatches.length
-        ? (sectionMatches[i + 1].index ?? afterTitle.length)
-        : afterTitle.length;
-
-    const rawHeading = m[1].trim();
-    const headline = stripDecorativeNumber(rawHeading);
-
-    // The item ID marker, if present, must appear before this heading and
-    // after the previous heading (or after the title, for the first item).
-    const beforeStart = m.index ?? 0;
-    const beforeEnd =
-      i === 0
-        ? 0
-        : (sectionMatches[i - 1].index ?? 0) + sectionMatches[i - 1][0].length;
-    const between = afterTitle.slice(beforeEnd, beforeStart);
-    const sourceItemId = ITEM_MARKER_RE.exec(between)?.[1];
-
-    const sectionBody = afterTitle.slice(sectionStart, sectionEnd).trim();
-    if (!sectionBody && !headline) continue;
-
-    items.push(parseSection(headline, sectionBody, sourceItemId));
+  if (sectionMatches.length === 0) {
+    // No H2s at all — anything left over (possibly H3s without a section)
+    // gets folded into a leading anonymous section.
+    const block = afterTitle.trim();
+    if (block) sections.push(parseSection('', block));
+  } else {
+    const leading = afterTitle.slice(0, sectionMatches[0].index ?? 0).trim();
+    if (leading) sections.push(parseSection('', leading));
+    for (let i = 0; i < sectionMatches.length; i += 1) {
+      const m = sectionMatches[i];
+      const sectionTitle = m[1].trim();
+      const sectionStart = (m.index ?? 0) + m[0].length;
+      const sectionEnd =
+        i + 1 < sectionMatches.length
+          ? (sectionMatches[i + 1].index ?? afterTitle.length)
+          : afterTitle.length;
+      const block = afterTitle.slice(sectionStart, sectionEnd);
+      sections.push(parseSection(sectionTitle, block));
+    }
   }
 
-  return {sourceId, title, items};
+  return {title, sections};
 }
 
-/** Strip a leading "1. " / "12. " etc. — the export emits these decoratively. */
+function parseSection(title: string, block: string): ParsedSection {
+  const itemMatches = Array.from(block.matchAll(/^###\s+(.+)$/gm));
+
+  let body = '';
+  const items: ParsedStackItem[] = [];
+
+  if (itemMatches.length === 0) {
+    body = block.trim();
+  } else {
+    body = block.slice(0, itemMatches[0].index ?? 0).trim();
+    for (let i = 0; i < itemMatches.length; i += 1) {
+      const m = itemMatches[i];
+      const headline = stripDecorativeNumber(m[1].trim());
+      const itemStart = (m.index ?? 0) + m[0].length;
+      const itemEnd =
+        i + 1 < itemMatches.length
+          ? (itemMatches[i + 1].index ?? block.length)
+          : block.length;
+      const itemBody = block.slice(itemStart, itemEnd).trim();
+      items.push(parseItem(headline, itemBody));
+    }
+  }
+
+  return {title, body, items};
+}
+
+/** Strip a leading "1. " / "12. " — tolerated for legacy outputs. */
 function stripDecorativeNumber(s: string): string {
   return s.replace(/^\d+\.\s+/, '').trim();
 }
 
-function parseSection(
-  headline: string,
-  body: string,
-  sourceItemId: string | undefined
-): ParsedStackItem {
+function parseItem(headline: string, body: string): ParsedStackItem {
   const lines = body.split('\n');
   const firstNonEmptyIdx = lines.findIndex(l => l.trim().length > 0);
-  const firstNonEmpty = firstNonEmptyIdx >= 0 ? lines[firstNonEmptyIdx].trim() : '';
+  const firstNonEmpty =
+    firstNonEmptyIdx >= 0 ? lines[firstNonEmptyIdx].trim() : '';
 
-  // Try v2 verse-set format first: a header line `> [ref](url)` followed by
+  // Multi-verse format first: `> [ref](url)` header line followed by
   // one or more `> N — text` body lines.
   const headerMatch = VERSE_HEADER_RE.exec(firstNonEmpty);
   if (headerMatch) {
@@ -206,9 +241,10 @@ function parseSection(
     for (; cursor < lines.length; cursor += 1) {
       const trimmed = lines[cursor].trim();
       if (trimmed === '') {
-        // Tolerate a single blank line inside the blockquote, but stop at
-        // any non-quote content — that's the start of the user's thought.
-        if (cursor + 1 < lines.length && lines[cursor + 1].trim().startsWith('>')) {
+        if (
+          cursor + 1 < lines.length &&
+          lines[cursor + 1].trim().startsWith('>')
+        ) {
           continue;
         }
         break;
@@ -222,7 +258,6 @@ function parseSection(
       verses.sort((a, b) => a.verse - b.verse);
       return {
         kind: 'verse',
-        sourceItemId,
         headline: headline || reference.trim(),
         reference: reference.trim(),
         url: url.trim(),
@@ -230,11 +265,12 @@ function parseSection(
         thought,
       };
     }
-    // Header without bodies — treat as a single verse with unknown number.
-    const thought = lines.slice(firstNonEmptyIdx + 1).join('\n').trim();
+    const thought = lines
+      .slice(firstNonEmptyIdx + 1)
+      .join('\n')
+      .trim();
     return {
       kind: 'verse',
-      sourceItemId,
       headline: headline || reference.trim(),
       reference: reference.trim(),
       url: url.trim(),
@@ -251,30 +287,25 @@ function parseSection(
       .slice(firstNonEmptyIdx + 1)
       .join('\n')
       .trim();
-    // We don't know the verse number from a legacy line — fall back to 1.
-    // The store-level migration will look it up against the corpus when
-    // the import is applied.
     return {
       kind: 'verse',
-      sourceItemId,
       headline: headline || reference.trim(),
       reference: reference.trim(),
       url: url.trim(),
-      verses: [{verse: extractFirstVerseNumber(reference) ?? 1, text: text.trim()}],
+      verses: [
+        {verse: extractFirstVerseNumber(reference) ?? 1, text: text.trim()},
+      ],
       thought,
     };
   }
 
-  // Note item: everything in the section is body.
   return {
     kind: 'note',
-    sourceItemId,
     headline: headline || firstLine(body) || 'Note',
-    body,
+    body: body.trim(),
   };
 }
 
-/** Pull the first verse number out of a reference like "1 Nephi 3:7-9". */
 function extractFirstVerseNumber(reference: string): number | undefined {
   const m = /:(\d+)/.exec(reference);
   return m ? parseInt(m[1], 10) : undefined;
@@ -293,96 +324,204 @@ function firstLine(s: string): string {
 // Diff — for the import-preview interstitial
 // ---------------------------------------------------------------------------
 
+export type DiffStatus = 'unchanged' | 'changed' | 'added' | 'removed';
+
 export interface ItemDiffEntry {
-  status: 'unchanged' | 'changed' | 'added' | 'removed';
+  status: DiffStatus;
   headline: string;
-  /** Present for unchanged / changed / added — the item from the markdown. */
   parsed?: ParsedStackItem;
-  /** Present for unchanged / changed / removed — the existing local item. */
   existing?: StackItem;
 }
 
-export interface ImportPreview {
-  action: 'create' | 'update';
-  /**
-   * Stack ID that will be written to. Either the existing stack's ID, the
-   * source ID from the markdown, or a freshly-generated one.
-   */
-  targetStackId: string;
-  /** Title from the markdown. */
+export interface SectionDiffEntry {
+  status: DiffStatus;
   title: string;
-  /** Existing stack, if this is an update. */
+  parsed?: ParsedSection;
+  existing?: Section;
+  items: ItemDiffEntry[];
+}
+
+export interface ImportPreview {
+  /**
+   * 'create'  = no existing stack matched the title; mint a new one.
+   * 'update'  = an existing stack matched by title; sections + items are
+   *             replaced authoritatively.
+   * 'replace' = explicit replace of a specific stack (from the stack's
+   *             own clipboard-import action). Title matching is skipped.
+   */
+  action: 'create' | 'update' | 'replace';
+  targetStackId: string;
+  title: string;
   existingTitle?: string;
   parsed: ParsedStack;
-  diff: ItemDiffEntry[];
+  diff: SectionDiffEntry[];
+}
+
+export interface ImportContext {
+  stacks: ReadonlyArray<Stack>;
+  sections: ReadonlyArray<Section>;
+  items: ReadonlyArray<StackItem>;
+  generateId: () => string;
 }
 
 /**
- * Compute a preview of what an import would do without actually applying it.
- * Pure — relies on a snapshot of stacks + items passed in by the caller.
+ * Compute a preview for a clipboard import initiated from the Stacks tab.
+ * Title-based identity: if any existing stack's title matches the parsed
+ * title (trimmed, case-insensitive), action is 'update' against that
+ * stack; otherwise 'create'.
  */
 export function computeImportPreview(
   parsed: ParsedStack,
-  stacks: ReadonlyArray<Stack>,
-  items: ReadonlyArray<StackItem>,
-  generateId: () => string
+  ctx: ImportContext
 ): ImportPreview {
-  const existing = parsed.sourceId
-    ? stacks.find(s => s.id === parsed.sourceId)
-    : undefined;
-  const targetStackId = existing?.id ?? parsed.sourceId ?? generateId();
-  const action: 'create' | 'update' = existing ? 'update' : 'create';
+  const existing = ctx.stacks.find(
+    s => normalizeTitle(s.title) === normalizeTitle(parsed.title)
+  );
+  if (existing) {
+    return buildExistingPreview('update', existing, parsed, ctx);
+  }
+  return {
+    action: 'create',
+    targetStackId: ctx.generateId(),
+    title: parsed.title,
+    parsed,
+    diff: parsed.sections.map(parsedToSectionDiffAdded),
+  };
+}
 
-  if (!existing) {
-    const diff: ItemDiffEntry[] = parsed.items.map(p => ({
-      status: 'added',
-      headline: p.headline,
-      parsed: p,
-    }));
-    return {action, targetStackId, title: parsed.title, parsed, diff};
+/**
+ * Compute a preview for the per-stack "Replace from clipboard" action.
+ * The target stack is fixed; title matching is skipped.
+ */
+export function computeReplacePreview(
+  parsed: ParsedStack,
+  targetStack: Stack,
+  ctx: ImportContext
+): ImportPreview {
+  return buildExistingPreview('replace', targetStack, parsed, ctx);
+}
+
+function buildExistingPreview(
+  action: 'update' | 'replace',
+  existing: Stack,
+  parsed: ParsedStack,
+  ctx: ImportContext
+): ImportPreview {
+  const existingSections = existing.sectionIds
+    .map(id => ctx.sections.find(s => s.id === id))
+    .filter((s): s is Section => s != null);
+
+  const matchedExistingSectionIds = new Set<string>();
+  const diff: SectionDiffEntry[] = [];
+
+  for (const ps of parsed.sections) {
+    const match = existingSections.find(
+      s =>
+        !matchedExistingSectionIds.has(s.id) &&
+        normalizeTitle(s.title) === normalizeTitle(ps.title)
+    );
+    if (match) {
+      matchedExistingSectionIds.add(match.id);
+      diff.push(buildSectionDiffMatched(ps, match, ctx));
+    } else {
+      diff.push(parsedToSectionDiffAdded(ps));
+    }
   }
 
+  for (const es of existingSections) {
+    if (!matchedExistingSectionIds.has(es.id)) {
+      diff.push(existingToSectionDiffRemoved(es, ctx));
+    }
+  }
+
+  return {
+    action,
+    targetStackId: existing.id,
+    title: parsed.title,
+    existingTitle: existing.title,
+    parsed,
+    diff,
+  };
+}
+
+function buildSectionDiffMatched(
+  parsed: ParsedSection,
+  existing: Section,
+  ctx: ImportContext
+): SectionDiffEntry {
   const existingItems = existing.itemIds
-    .map(id => items.find(i => i.id === id))
+    .map(id => ctx.items.find(i => i.id === id))
     .filter((i): i is StackItem => i != null);
 
-  const matchedExistingIds = new Set<string>();
-  const diff: ItemDiffEntry[] = [];
+  const matchedExistingItemIds = new Set<string>();
+  const items: ItemDiffEntry[] = [];
 
   for (const p of parsed.items) {
-    const match = p.sourceItemId
-      ? existingItems.find(i => i.id === p.sourceItemId)
-      : undefined;
+    const match = existingItems.find(
+      e =>
+        !matchedExistingItemIds.has(e.id) &&
+        normalizeTitle(e.headline) === normalizeTitle(p.headline)
+    );
     if (match) {
-      matchedExistingIds.add(match.id);
-      diff.push({
+      matchedExistingItemIds.add(match.id);
+      items.push({
         status: itemsEqual(p, match) ? 'unchanged' : 'changed',
         headline: p.headline,
         parsed: p,
         existing: match,
       });
     } else {
-      diff.push({status: 'added', headline: p.headline, parsed: p});
+      items.push({status: 'added', headline: p.headline, parsed: p});
     }
   }
 
-  for (const ex of existingItems) {
-    if (!matchedExistingIds.has(ex.id)) {
-      diff.push({
+  for (const e of existingItems) {
+    if (!matchedExistingItemIds.has(e.id)) {
+      items.push({
         status: 'removed',
-        headline: ex.headline || itemFallbackLabel(ex),
-        existing: ex,
+        headline: e.headline || itemFallback(e),
+        existing: e,
       });
     }
   }
 
+  const anyItemChanged = items.some(i => i.status !== 'unchanged');
+  const bodyChanged = parsed.body.trim() !== existing.body.trim();
+  const status: DiffStatus =
+    anyItemChanged || bodyChanged ? 'changed' : 'unchanged';
+
+  return {status, title: parsed.title, parsed, existing, items};
+}
+
+function parsedToSectionDiffAdded(parsed: ParsedSection): SectionDiffEntry {
   return {
-    action,
-    targetStackId,
+    status: 'added',
     title: parsed.title,
-    existingTitle: existing.title,
     parsed,
-    diff,
+    items: parsed.items.map(p => ({
+      status: 'added' as const,
+      headline: p.headline,
+      parsed: p,
+    })),
+  };
+}
+
+function existingToSectionDiffRemoved(
+  existing: Section,
+  ctx: ImportContext
+): SectionDiffEntry {
+  const existingItems = existing.itemIds
+    .map(id => ctx.items.find(i => i.id === id))
+    .filter((i): i is StackItem => i != null);
+  return {
+    status: 'removed',
+    title: existing.title,
+    existing,
+    items: existingItems.map(e => ({
+      status: 'removed' as const,
+      headline: e.headline || itemFallback(e),
+      existing: e,
+    })),
   };
 }
 
@@ -407,7 +546,11 @@ function itemsEqual(parsed: ParsedStackItem, existing: StackItem): boolean {
   return false;
 }
 
-function itemFallbackLabel(item: StackItem): string {
+function itemFallback(item: StackItem): string {
   if (item.kind === 'verse') return item.reference;
   return firstLine(item.body) || 'Note';
+}
+
+function normalizeTitle(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, ' ');
 }

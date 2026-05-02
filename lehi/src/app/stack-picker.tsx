@@ -19,12 +19,12 @@ export default function StackPickerScreen() {
   const {colorScheme} = useColorScheme();
   const isDark = colorScheme === 'dark';
 
-  const stacks = useStacksStore((s) => s.stacks);
-  const items = useStacksStore((s) => s.items);
-  const pendingVerses = useStacksStore((s) => s.pendingVerses);
-  const addVerseSetToStack = useStacksStore((s) => s.addVerseSetToStack);
-  const createStack = useStacksStore((s) => s.createStack);
-  const clearPendingVerses = useStacksStore((s) => s.clearPendingVerses);
+  const stacks = useStacksStore(s => s.stacks);
+  const items = useStacksStore(s => s.items);
+  const pendingVerses = useStacksStore(s => s.pendingVerses);
+  const addVerseSetToStack = useStacksStore(s => s.addVerseSetToStack);
+  const createStack = useStacksStore(s => s.createStack);
+  const clearPendingVerses = useStacksStore(s => s.clearPendingVerses);
 
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -51,13 +51,17 @@ export default function StackPickerScreen() {
    * with an identical reference already lives in the target stack, we
    * don't create a duplicate.
    */
-  const addSetTo = (stackId: string): {added: boolean; duplicateRef?: string} => {
+  const addSetTo = (
+    stackId: string
+  ): {added: boolean; duplicateRef?: string} => {
     const item = addVerseSetToStack(stackId, pendingVerses);
     // Check whether an existing item already represents the same set —
     // we look at the reference string we just computed.
     const duplicate = items
-      .filter((i) => i.stackId === stackId && i.kind === 'verse' && i.id !== item.id)
-      .find((i) => i.kind === 'verse' && i.reference === item.reference);
+      .filter(
+        i => i.stackId === stackId && i.kind === 'verse' && i.id !== item.id
+      )
+      .find(i => i.kind === 'verse' && i.reference === item.reference);
     if (duplicate) {
       // Roll back: remove the just-added duplicate. Calling removeItem keeps
       // ordering / persistence consistent.
@@ -81,7 +85,9 @@ export default function StackPickerScreen() {
     }
     hapticSuccess();
     const label =
-      verseCountInSet === 1 ? setReference : `${setReference} (${verseCountInSet} verses)`;
+      verseCountInSet === 1
+        ? setReference
+        : `${setReference} (${verseCountInSet} verses)`;
     toast({title: `Added ${label} to ${stackTitle}`, preset: 'done'});
   };
 
@@ -195,9 +201,7 @@ export default function StackPickerScreen() {
               </Text>
               <Text className="text-xs text-neutral-500 dark:text-neutral-400">
                 Start a fresh draft with{' '}
-                {verseCount === 1
-                  ? 'this verse'
-                  : `these ${verseCount} verses`}
+                {verseCount === 1 ? 'this verse' : `these ${verseCount} verses`}
               </Text>
             </View>
           </AnimatedPressable>
@@ -218,7 +222,7 @@ export default function StackPickerScreen() {
         ) : (
           <FlatList
             data={sortedStacks}
-            keyExtractor={(s) => s.id}
+            keyExtractor={s => s.id}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{paddingHorizontal: 16, paddingBottom: 24}}
             renderItem={({item}) => (
@@ -258,12 +262,18 @@ function StackPickerRow({
     const targetRef = previewSetReference(pendingVerses);
     if (!targetRef) return false;
     return items.some(
-      (i) =>
-        i.stackId === stack.id && i.kind === 'verse' && i.reference === targetRef
+      i =>
+        i.stackId === stack.id &&
+        i.kind === 'verse' &&
+        i.reference === targetRef
     );
   }, [items, stack.id, pendingVerses]);
 
-  const itemCount = stack.itemIds.length;
+  const sections = useStacksStore(s => s.sections);
+  const itemCount = (stack.sectionIds ?? []).reduce((acc, sid) => {
+    const section = sections.find(s => s.id === sid);
+    return acc + (section?.itemIds.length ?? 0);
+  }, 0);
 
   return (
     <AnimatedPressable

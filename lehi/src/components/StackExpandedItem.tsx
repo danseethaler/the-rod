@@ -1,14 +1,24 @@
-import {ChevronUp, RotateCcw, Trash2} from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
+import {
+  ChevronUp,
+  Copy,
+  ExternalLink,
+  RotateCcw,
+  Trash2,
+} from 'lucide-react-native';
 import {useColorScheme} from 'nativewind';
 import React, {useCallback, useMemo} from 'react';
-import {Text, TextInput, View} from 'react-native';
+import {Linking, Text, TextInput, View} from 'react-native';
 
 import {AnimatedPressable} from '@/components/AnimatedPressable';
 import {
   EditableVerseText,
   type VerseSelection,
 } from '@/components/EditableVerseText';
+import {hapticError, hapticSuccess} from '@/lib/haptics';
+import {itemToMarkdown} from '@/lib/markdown';
 import {getCanonicalVerseText} from '@/lib/scripture';
+import {toast} from '@/lib/toast';
 import type {StackItem, StackItemVerse, VerseRef} from '@/lib/types';
 
 interface Props {
@@ -110,17 +120,32 @@ export const StackExpandedItem = React.memo(function StackExpandedItem({
         </View>
       )}
 
-      <View className="flex-row justify-end px-2 py-2 border-t border-neutral-100 dark:border-neutral-700">
-        <AnimatedPressable
+      <View className="flex-row items-center justify-end gap-1 px-2 py-2 border-t border-neutral-100 dark:border-neutral-700">
+        {item.kind === 'verse' && item.url ? (
+          <ActionButton
+            label="Open"
+            icon={
+              <ExternalLink size={14} color={isDark ? '#fbbf24' : '#b45309'} />
+            }
+            onPress={() => openInGospelLibrary(item)}
+            tone="brand"
+            isDark={isDark}
+          />
+        ) : null}
+        <ActionButton
+          label="Copy"
+          icon={<Copy size={14} color={isDark ? '#fbbf24' : '#b45309'} />}
+          onPress={() => copyAsMarkdown(item)}
+          tone="brand"
+          isDark={isDark}
+        />
+        <ActionButton
+          label="Remove"
+          icon={<Trash2 size={14} color={isDark ? '#fca5a5' : '#dc2626'} />}
           onPress={onRemove}
-          className="flex-row items-center gap-1.5 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/20"
-          accessibilityLabel="Remove item"
-        >
-          <Trash2 size={14} color={isDark ? '#fca5a5' : '#dc2626'} />
-          <Text className="text-sm font-medium text-red-600 dark:text-red-300">
-            Remove
-          </Text>
-        </AnimatedPressable>
+          tone="danger"
+          isDark={isDark}
+        />
       </View>
     </View>
   );
@@ -262,3 +287,65 @@ const VerseRow = React.memo(function VerseRow({
     </View>
   );
 });
+
+// ---------------------------------------------------------------------------
+// Per-item actions
+// ---------------------------------------------------------------------------
+
+async function openInGospelLibrary(item: StackItemVerse): Promise<void> {
+  const url = item.url;
+  if (!url) {
+    hapticError();
+    toast({title: 'No link for this verse', preset: 'error'});
+    return;
+  }
+  try {
+    await Linking.openURL(url);
+    hapticSuccess();
+  } catch {
+    hapticError();
+    toast({title: 'Could not open link', preset: 'error'});
+  }
+}
+
+async function copyAsMarkdown(item: StackItem): Promise<void> {
+  const md = itemToMarkdown(item);
+  await Clipboard.setStringAsync(md);
+  hapticSuccess();
+  toast({title: 'Copied as markdown', preset: 'done'});
+}
+
+function ActionButton({
+  label,
+  icon,
+  onPress,
+  tone,
+  isDark,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  onPress: () => void;
+  tone: 'brand' | 'danger';
+  isDark: boolean;
+}) {
+  void isDark;
+  const containerCls =
+    tone === 'danger'
+      ? 'bg-red-50 dark:bg-red-900/20'
+      : 'bg-brand-50 dark:bg-brand-900/30';
+  const labelCls =
+    tone === 'danger'
+      ? 'text-red-600 dark:text-red-300'
+      : 'text-brand-700 dark:text-brand-300';
+
+  return (
+    <AnimatedPressable
+      onPress={onPress}
+      accessibilityLabel={label}
+      className={`flex-row items-center gap-1.5 px-3 py-2 rounded-xl ${containerCls}`}
+    >
+      {icon}
+      <Text className={`text-sm font-medium ${labelCls}`}>{label}</Text>
+    </AnimatedPressable>
+  );
+}

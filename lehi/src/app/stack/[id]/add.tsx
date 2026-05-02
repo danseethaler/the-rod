@@ -14,11 +14,7 @@ import {hapticLight, hapticSuccess} from '@/lib/haptics';
 import {searchVerses} from '@/lib/scripture';
 import {toast} from '@/lib/toast';
 import type {Verse} from '@/lib/types';
-import {
-  resolveStackItems,
-  selectStackById,
-  useStacksStore,
-} from '@/store/useStacksStore';
+import {selectStackById, useStacksStore} from '@/store/useStacksStore';
 
 export default function AddVerseScreen() {
   const {id} = useLocalSearchParams<{id: string}>();
@@ -27,12 +23,14 @@ export default function AddVerseScreen() {
   const isDark = colorScheme === 'dark';
 
   const stack = useStacksStore(selectStackById(id));
-  const allItems = useStacksStore((s) => s.items);
+  const allItems = useStacksStore(s => s.items);
+  // Only used for duplicate detection — order doesn't matter, so we just
+  // filter by stackId instead of walking sections.
   const items = useMemo(
-    () => resolveStackItems(stack, allItems),
+    () => (stack ? allItems.filter(i => i.stackId === stack.id) : []),
     [stack, allItems]
   );
-  const addVerseSetToStack = useStacksStore((s) => s.addVerseSetToStack);
+  const addVerseSetToStack = useStacksStore(s => s.addVerseSetToStack);
 
   const [query, setQuery] = useState('');
   const inputRef = useRef<TextInput>(null);
@@ -129,7 +127,7 @@ export default function AddVerseScreen() {
         ) : (
           <FlatList
             data={result.verses}
-            keyExtractor={(v) => `${v.standardWorkSlug}-${v.reference}`}
+            keyExtractor={v => `${v.standardWorkSlug}-${v.reference}`}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             contentContainerStyle={{paddingBottom: 24}}
@@ -159,7 +157,10 @@ export default function AddVerseScreen() {
                     >
                       {added ? (
                         <>
-                          <Check size={16} color={isDark ? '#86efac' : '#16a34a'} />
+                          <Check
+                            size={16}
+                            color={isDark ? '#86efac' : '#16a34a'}
+                          />
                           <Text className="text-sm font-semibold text-green-700 dark:text-green-300">
                             Already in stack
                           </Text>

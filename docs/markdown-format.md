@@ -8,8 +8,11 @@ workflow) that need to produce or transform Krumb-importable notes.
 When in doubt, the implementation is the source of truth:
 
 - Serializer: `lehi/src/lib/markdown.ts → stackToMarkdown`
+- Per-item serializer (used by the "Copy as markdown" action):
+  `lehi/src/lib/markdown.ts → itemToMarkdown`
 - Parser: `lehi/src/lib/markdown.ts → markdownToStack`
-- Diff: `lehi/src/lib/markdown.ts → computeImportPreview`
+- Diff (Stacks-tab import): `lehi/src/lib/markdown.ts → computeImportPreview`
+- Diff (per-stack replace):  `lehi/src/lib/markdown.ts → computeReplacePreview`
 
 If you change the format, change those files in the same commit.
 
@@ -17,132 +20,128 @@ If you change the format, change those files in the same commit.
 
 ## Goals
 
-1. **Round-trip cleanly between Krumb instances** (production app on
-   phone, dev app on phone, future devices) — the same stack moving via
-   clipboard should land back on itself, not duplicate.
+1. **Round-trip cleanly between Krumb instances** (production app, dev
+   app, future devices) — the same stack moving via clipboard should
+   land back on itself, not duplicate.
 2. **Survive Bear** — Bear is the user's existing notes home. A stack
    exported to Bear, lightly edited, and re-imported should still parse.
 3. **Read pleasantly as plain markdown** — the export is also the talk
-   draft itself. Markers must be invisible in any rendered view.
-4. **Layout-driven** — the structure of the markdown is what conveys
-   meaning. The two HTML-comment markers carry identity only; they
-   never separate content from content.
+   draft itself. No HTML-comment markers; the structure of the document
+   is the format.
+4. **Mirror the way talks are actually written.** A talk has an
+   introduction, a principle, another principle, a closing. Sections
+   are first-class.
 
 ---
 
 ## What stacks are (and aren't)
 
 A stack is a **short-lived draft talk in motion** — typically tens of
-items, lifecycle measured in days or weeks, exported when shipped, then
-archived or deleted. The format is shaped for that.
+items grouped into a handful of sections, lifecycle measured in days or
+weeks, exported when shipped, then archived or deleted.
 
-Stacks are *not* a permanent library, a tag-driven knowledge base, or a
-Zettelkasten. If that ever changes, this format will need to grow
-(per-item versioning, per-stack tags, etc). Today it does not.
+Stacks are *not* a permanent library. If that ever changes, this format
+will need to grow.
 
 ---
 
 ## Structure
 
 ```markdown
-<!-- krumb:stack:{stack-id} -->
-# {Stack title}
+# Stack title
 
-<!-- krumb:item:{item-id} -->
-## {Headline}
+## Section title
 
-{Item body}
+Optional description for this section.
 
-<!-- krumb:item:{item-id} -->
-## {Headline}
+### Item headline
 
-{Item body}
+> [Reference](url)
+> 7 — verse text
+
+Optional thought.
+
+### Another item
+
+note body
+
+## Second section
+
+Another section description.
+
+### Item headline
+
+> [Reference](url)
+> 12 — verse text
+> 13 — verse text
 ```
 
-**Required:** the `# {title}` line. That's the only thing the parser
+**Required:** the `# Title` line. That's the only thing the parser
 absolutely needs to see.
 
-**Optional but emitted on export:**
+**Heading hierarchy:**
 
-- `<!-- krumb:stack:{stack-id} -->` — stack-level identity for
-  round-trips. See *Round-trip identity*.
-- `<!-- krumb:item:{item-id} -->` — per-item identity. Lets the import
-  preview compute a diff and lets us preserve `createdAt` on items that
-  survived a round-trip.
+| Level | Meaning |
+|-------|---------|
+| `#`   | Stack title — exactly one |
+| `##`  | Section title — zero or more |
+| `###` | Item headline — zero or more per section |
+
+A stack always contains at least one section. If the imported markdown
+has H3s before any H2, the parser folds them into a leading anonymous
+section so they aren't lost.
 
 ---
 
-## Markers
+## Identity (no markers)
 
-HTML comments are preserved by Bear (and by every common markdown
-renderer), and they render as nothing visible.
+The format carries **no HTML comments and no hidden identifiers.**
+Identity is title-based:
 
-### `<!-- krumb:stack:{id} -->`
+- **Stack** — by `#` heading, trimmed and case-folded.
+- **Section** — by `##` heading within a stack (during diff only).
+- **Item** — by `###` headline within its parent section (during diff
+  only).
 
-Emitted as the very first line of the export. The `{id}` is the
-producing stack's local ID. On import:
+Identity drives the **diff** in the import-preview screen. The actual
+**apply** is always a full replacement: the imported markdown wins for
+the matched stack's title, sections, items, and per-item contents.
 
-| Marker present? | Stack with that ID exists locally? | Result |
-|-----------------|------------------------------------|--------|
-| Yes             | Yes                                | **Update** the existing stack. |
-| Yes             | No                                 | **Create** with the same ID. (Prod ↔ dev sync — same stack, different app instances.) |
-| No              | —                                  | **Create** with a fresh ID. |
+### Two import entry points
 
-### `<!-- krumb:item:{id} -->`
+| Entry point | Behavior |
+|-------------|----------|
+| **Stacks tab clipboard icon** | Parse → look up an existing stack by title. If matched, preview an *update*. Otherwise preview a *create*. |
+| **Stack detail clipboard icon** | Parse → preview a *replace* of THIS specific stack (title match is bypassed; the user chose the target). |
 
-Emitted immediately before each `## ` heading, on its own line. Lets
-the parser reattach an imported item to its existing local twin so:
+Both entry points show the interstitial preview before applying.
 
-- Unchanged items keep their original `createdAt`.
-- The import-preview diff can show "X unchanged / Y changed / Z added /
-  W removed" by ID rather than by guessing.
+### Trade-off (intentional)
 
-If the marker is absent (Bear-edited variant where the user typed a
-brand-new `## ` section without the comment), the item is treated as
-new on import.
-
-### What the format does **not** carry
-
-- **No body/thought separator marker.** Layout determines body and
-  thought — see *Items* below.
-- **No item-kind marker.** Kind is detected from layout: a section
-  whose first non-empty line is a verse blockquote is a verse;
-  otherwise it's a note.
+Without per-item identity markers, **renaming an item heading reads as
+"removed + added" in the diff**, not as "headline changed." Same for
+section renames. The body / blockquote / thought visual is still
+preserved on the new item; we just lose the rename labeling. This is
+the cost of a marker-free format and we accept it.
 
 ---
 
 ## Items
 
-Each item is a `## ` section. The `## ` heading text is the
-**headline** — a user-editable label, defaulted from the item's content
-on first creation. Examples:
-
-- For a verse: defaults to the reference (e.g. `## Mosiah 4:30`).
-- For a note: defaults to the first line of the body.
-
-The user can edit the headline freely; the parser treats whatever's in
-the heading as the headline. The parser also strips a leading decorative
-number (`1. `, `12. `) — the export doesn't emit those today, but the
-parser tolerates them.
+The first non-empty line in an item's body determines its kind.
 
 ### Verse items
 
-A verse item is a **verse set** — one or more verses, all from the
-same chapter, treated as a single unit. The reference covers the whole
-set:
-
-- single: `1 Nephi 3:7`
-- contiguous range: `1 Nephi 3:7-9`
-- non-contiguous: `1 Nephi 3:7, 9, 12-14`
-
-The blockquote spans multiple lines. The first line is a header carrying
-the reference + URL. Each verse follows on its own quoted line keyed by
-verse number:
+Verses are emitted as a multi-line blockquote: a header line with the
+reference + URL, followed by one quoted line per verse.
 
 ```markdown
-> [{reference}]({url})
-> {verseN} — {verse N text}
-> {verseM} — {verse M text}
+### Mosiah 4:30
+
+> [Mosiah 4:30](https://www.churchofjesuschrist.org/.../mosiah/4?id=p30#p30)
+> 30 — But this much I can tell you, that if ye do not watch yourselves…
+
+User's commentary on this verse.
 ```
 
 Recognised by:
@@ -152,59 +151,139 @@ header line:  /^>\s*\[([^\]]+)\]\(([^)]+)\)\s*$/
 verse line:   /^>\s*(\d+)\s*[—\-.]\s*(.+)$/
 ```
 
-The verse-line separator accepts em-dash `—`, hyphen `-`, or a period
-`.` (to tolerate editors that auto-substitute).
+A multi-verse set keeps the same shape with additional verse lines:
 
-#### URL format
+```markdown
+### Alma 32:21-23
 
-Verse URLs use the official Gospel Library deep-linking syntax with
-`id=` highlight params:
+> [Alma 32:21-23](url)
+> 21 — And now as I said concerning faith…
+> 22 — And now, behold, I say unto you…
+> 23 — And now, he imparteth his word…
 
-- single verse: `…/3?lang=eng&id=p7#p7`
-- range: `…/3?lang=eng&id=p7-p9#p7`
-- non-contiguous: `…/3?lang=eng&id=p7,p9-p11#p7`
+Optional thought after the blockquote.
+```
 
-Always include a fragment (`#p{first}`) so the linked page scrolls to
-the first verse in the set.
+The parser also accepts the **legacy single-line format**
+(`> [ref](url) — text`) for backward compatibility with older exports
+and looser hand-edited input.
 
-#### Thought
-
-Anything after the blockquote — until the next `## ` heading — is the
-**thought**: the user's commentary on the set. Verses keep `thought` as
-a distinct field because the verse text is bounded scripture, not the
-user's reflection on it.
+Anything after the verse blockquote, until the next `###` or `##`, is
+the **thought** — the user's commentary. Verses keep `thought` as a
+distinct field from the scripture text itself.
 
 Maps to:
 
 ```ts
-{
-  kind: 'verse',
-  headline,
-  reference,           // formatted across the whole set
-  url,                 // id=p... highlight URL
-  verses: [{verse, text}, ...],  // sorted ascending by verse number
-  thought,
+{ kind: 'verse', headline, reference, url, verses: VerseRef[], thought }
+```
+
+### Note items
+
+Anything that isn't a verse blockquote is a note. Multi-line free text.
+
+```markdown
+### Build a bridge between the verses
+
+The point is that faith is by definition incomplete knowledge — and
+that's exactly what makes works the only honest test of whether the
+faith is real.
+```
+
+Maps to:
+
+```ts
+{ kind: 'note', headline, body }
+```
+
+A note **does not have a separate thought field.** A note IS the user's
+thought; an extra layer would be redundant.
+
+---
+
+## Per-item copy ("Copy as markdown")
+
+The expanded item card has a **Copy** action that emits the same shape
+the full stack export emits for that one item — `### headline`, the
+verse blockquote (or note body), and the optional thought. The result
+is a drop-in fragment that pastes cleanly into any Krumb stack or any
+Bear note that follows the format.
+
+---
+
+## Type model (reference)
+
+```ts
+interface Stack {
+  id: string;
+  title: string;
+  status: 'baking' | 'done' | 'archived';
+  sectionIds: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface Section {
+  id: string;
+  stackId: string;
+  title: string;
+  body: string;          // optional H2 description
+  itemIds: string[];
+  createdAt: number;
+}
+
+interface StackItemBase {
+  id: string;
+  stackId: string;
+  headline: string;
+  createdAt: number;
+}
+
+interface StackItemVerse extends StackItemBase {
+  kind: 'verse';
+  reference: string;
+  url: string;
+  standardWorkSlug: string;
+  bookSlug?: string;
+  chapter: number;
+  verses: VerseRef[];
+  thought: string;
+}
+
+interface StackItemNote extends StackItemBase {
+  kind: 'note';
+  body: string;
+}
+
+interface VerseRef {
+  verse: number;
+  text: string;          // Bear-flavored markdown for this single verse
 }
 ```
 
-#### Same-chapter invariant
+---
 
-All verses in a single set must share `standardWorkSlug` + `bookSlug` +
-`chapter`. This is enforced inside Krumb (the multi-select UI is
-per-chapter; the search-list adds a single verse). Cross-chapter sets
-require a different deep-link strategy and are out of scope; if you
-need to express two chapters in one stack, emit two `## ` items.
+## What is **not** in the format
 
-#### Inline formatting + trim inside verse text
+These are deliberate omissions:
 
-Each verse's text is **Bear-flavored markdown**, not plain text. Krumb
-has a constrained inline editor that lets users mark portions of a
-verse and trim out passages they don't want to quote. Plain scripture
-text is also valid markdown (no markers = no formatting), so existing
-or imported content flows through cleanly.
+- **Stack status** (`baking` / `done` / `archived`). Local-only. On
+  create-via-import, status defaults to `baking`. On
+  update-via-import, the existing local status is preserved.
+- **Section collapse state.** UI-only, session-scoped. Not persisted,
+  not exported.
+- **Item or section IDs.** No identifiers in the markdown — see
+  *Identity* above.
+- **Citations** (Slice 3 — BYU SCI). Not yet a kind. When added,
+  expected shape is a second blockquote variant.
+- **Multimedia / attachments.** Voice memos, images: future work.
 
-Supported markers — these match Bear's keyboard shortcuts so the same
-text round-trips across both apps without translation:
+---
+
+## Inline verse formatting
+
+Verse text inside the blockquote can carry **Bear-flavored inline
+markers** that survive a round-trip:
 
 | Style       | Marker            | Bear ⌘ shortcut |
 |-------------|-------------------|-----------------|
@@ -215,201 +294,8 @@ text round-trips across both apps without translation:
 | Highlight   | `==text==`        | ⌘⇧M             |
 
 Krumb exposes **bold, italic, underline, and highlight** in its own
-selection bar. Strikethrough is parsed leniently (markers stripped, no
-visible style applied) so a user who applies it in Bear doesn't get a
-broken parse — but the next round-trip silently drops it. Don't rely on
-strikethrough surviving a round-trip.
-
-Trim is encoded as a literal Unicode horizontal ellipsis `…` (U+2026)
-embedded in the verse text. There's no structural marker — the
-character is just part of the text. Examples:
-
-```markdown
-> 7 — And it came to pass that I, Nephi, said unto my father: I will go and do the things which the Lord hath commanded.
-> 7 — … I will go and do the things which the Lord hath commanded.
-> 7 — And it came to pass that I, Nephi, said unto my father: I will go and do …
-> 7 — And it came to pass … which the Lord hath commanded.
-```
-
-All four are valid storage shapes. The user-facing "Reset" action
-restores the canonical scripture text by looking the verse up against
-Krumb's bundled corpus (i.e. it discards any inline edits — formatting
-markers and trims).
-
-External producers generating Krumb-bound markdown:
-- Plain scripture text is fine — no markers required.
-- If you apply formatting, use the markers above.
-- If you trim, embed `…` (U+2026) in the text. Don't invent a custom
-  trim sentinel.
-
-#### Legacy single-line format
-
-For backward compatibility, the parser still accepts the pre-grouped
-shape:
-
-```markdown
-> [{reference}]({url}) — {verse text}
-```
-
-This is treated as a single-verse set. The verse number is parsed out
-of the reference (`1 Nephi 3:7` → 7) when present, falling back to 1.
-**Do not emit this format from new producers** — emit the multi-line
-shape so the round-trip is lossless.
-
-### Note items
-
-Anything else — free-text body. Multi-line is fine. The body can include
-its own blockquotes, lists, etc. — anything that isn't a `## ` heading
-is treated as part of the body.
-
-A note **does not** have a separate "thought" field. A note IS the
-user's thought; an extra layer would be redundant.
-
-Maps to:
-
-```ts
-{ kind: 'note', headline, body }
-```
-
----
-
-## Example (clean round-trip export)
-
-```markdown
-<!-- krumb:stack:lph9q1xv_a8b3kf2 -->
-# Faith without works
-
-<!-- krumb:item:item_001 -->
-## James 2:17
-
-> [James 2:17](https://www.churchofjesuschrist.org/study/scriptures/nt/james/2?lang=eng&id=p17#p17)
-> 17 — Even so faith, if it hath not works, is dead, being alone.
-
-The whole letter circles this. "Show me thy faith without thy works,
-and I will show thee my faith by my works."
-
-<!-- krumb:item:item_002 -->
-## Alma 32:21-23
-
-> [Alma 32:21-23](https://www.churchofjesuschrist.org/study/scriptures/bofm/alma/32?lang=eng&id=p21-p23#p21)
-> 21 — And now as I said concerning faith—faith is not to have a perfect knowledge of things; therefore if ye have faith ye hope for things which are not seen, which are true.
-> 22 — And now, behold, I say unto you, and I would that ye should remember, that God is merciful unto all who believe on his name; therefore he desireth, in the first place, that ye should believe, yea, even on his word.
-> 23 — And now, he imparteth his word by angels unto men, yea, not only men but women also. Now this is not all; little children do have words given unto them many times, which confound the wise and the learned.
-
-<!-- krumb:item:item_003 -->
-## Build a bridge here
-
-This note is the bridge between the two scriptures. The point is that
-faith is by definition incomplete knowledge — and that's exactly what
-makes works the only honest test of whether the faith is real.
-
-Maybe end on Heb 11:1 if there's time.
-```
-
-Item 1 (verse set, one verse) has a thought. Item 2 (verse set, three
-contiguous verses) has no thought, so the section is just the
-blockquote. Item 3 (note) is purely body — the headline "Build a
-bridge here" is editable; the parser uses whatever's in the `## `
-heading.
-
----
-
-## Example (Bear-edited variant)
-
-The user opens the above in Bear, fixes the thought on item 1, deletes
-item 2 entirely, and adds a brand-new note at the end. Re-importing:
-
-```markdown
-<!-- krumb:stack:lph9q1xv_a8b3kf2 -->
-# Faith without works
-
-<!-- krumb:item:item_001 -->
-## James 2:17
-
-> [James 2:17](...)
-> 17 — Even so faith, if it hath not works, is dead, being alone.
-
-The whole letter circles this. Faith without works isn't faith at all
-— it's wishful thinking dressed up.
-
-<!-- krumb:item:item_003 -->
-## Build a bridge here
-
-This note is the bridge — faith is by definition incomplete knowledge.
-
-## Closing thought
-
-End on the practical: this week, what's one act of works to test our
-faith?
-```
-
-Import preview will show:
-
-- **Changed:** "James 2:17" (thought rewritten)
-- **Removed:** "Alma 32:21-23" (no longer in the markdown)
-- **Unchanged:** "Build a bridge here"
-- **Added:** "Closing thought" (no `krumb:item` marker → treated as new)
-
-The user confirms; the local stack updates accordingly.
-
----
-
-## Type model
-
-```ts
-interface StackItemBase {
-  id: string;
-  stackId: string;
-  headline: string;     // user-editable
-  createdAt: number;
-}
-
-interface VerseRef {
-  verse: number;        // 1-indexed verse number within the chapter
-  text: string;         // the scripture text for this single verse
-}
-
-interface StackItemVerse extends StackItemBase {
-  kind: 'verse';
-  reference: string;    // formatted across whole set: "1 Nephi 3:7-9"
-  url: string;          // Gospel Library deep link with id= highlights
-  standardWorkSlug: string;
-  bookSlug?: string;    // omitted for D&C / PoGP sections
-  chapter: number;      // shared by every verse in the set
-  verses: VerseRef[];   // sorted ascending by `verse`, always non-empty
-  thought: string;      // user's commentary on the set
-}
-
-interface StackItemNote extends StackItemBase {
-  kind: 'note';
-  body: string;         // the note IS the thought
-}
-```
-
-The chapter-context fields (`standardWorkSlug`, `bookSlug`, `chapter`)
-live on the item but **are not serialized into markdown**. They're
-recovered on import by looking the first verse up against Krumb's
-bundled corpus by `{chapter title}:{first verse number}`. Producers
-generating Krumb-bound markdown from outside the app don't need to
-emit them.
-
----
-
-## What is **not** in the format (today)
-
-These are deliberate omissions, listed so future agents don't try to
-infer them:
-
-- **Stack status** (`baking` / `done` / `archived`). Not encoded. On
-  create-via-import, status defaults to `baking`. On
-  update-via-import, the existing local status is preserved. Status is
-  intentionally a local concern — Bear doesn't have a notion of it,
-  and round-trips shouldn't second-guess what the user marked locally.
-- **Citations** (Slice 3 — BYU SCI). Not yet a kind. When added,
-  expected shape is a second blockquote variant, e.g.
-  `> *Talk Title* — Speaker, October 2014` with its own URL.
-- **Per-item ordering markers.** Order is positional in the markdown.
-- **Multimedia / attachments.** Voice memos, images: future work.
+selection bar inside an expanded verse item. Strikethrough is parsed
+leniently (markers stripped, no visible style).
 
 ---
 
@@ -418,21 +304,22 @@ infer them:
 When generating a Krumb-importable stack from elsewhere (e.g. a Bear
 workflow that condenses a longer note into a stack):
 
-- **Don't fabricate a `krumb:stack:` marker.** If you don't have a real
-  stack ID from Krumb, omit the marker entirely. The import will create
-  a fresh stack. Inventing an ID risks silently overwriting an
-  unrelated existing stack on import.
-- **Don't fabricate `krumb:item:` markers either.** Without a real
-  item ID, omit the marker. Krumb will treat the item as new and assign
-  one on apply.
-- **Always emit `# Title` as the very first heading.**
-- **Verse blockquotes need the URL.** It's the link out to Gospel
-  Library. Without it, the section is parsed as a note, not a verse.
-  Use the multi-line shape (`> [Reference](url)` header + one `> N —
-  text` line per verse). Use the official `id=p..#p..` highlight URL.
-- **The `## ` heading text is the headline.** If you set a meaningful
-  one, the user will see it in the import preview and on the item
-  card.
+- **Always emit `# Title` as the very first heading.** Without this the
+  parser throws.
+- **Group items inside `## Section` blocks.** A stack always has at
+  least one section. If you're generating a flat list, wrap it in one
+  section.
+- **`## Section` headings can be empty** (just `##` with no text), but
+  prefer giving them real titles since matching uses titles.
+- **Verse blockquotes need the URL** in the header line. Without it,
+  the section is parsed as a note. Format: header line
+  `> [Reference](url)`, then one or more `> N — text` lines.
+- **The `## ` and `### ` heading text matters** — those are the
+  identifiers used by the diff. Two sections with the same `##` title
+  in the same stack would collide; same for two items with the same
+  `###` title in the same section.
+- **Don't fabricate IDs of any kind.** The format has no identifier
+  fields. If you're building markdown from scratch, just emit the
+  heading hierarchy.
 - **Notes have no thought field.** If you want a note's body and a
-  separate "thought," make two items — one note for the thought, one
-  whatever for the rest.
+  separate "thought," make two items.

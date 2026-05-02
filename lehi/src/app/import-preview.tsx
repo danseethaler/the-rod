@@ -8,7 +8,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {AnimatedPressable} from '@/components/AnimatedPressable';
 import {ScreenHeader} from '@/components/ScreenHeader';
 import {hapticLight, hapticSuccess} from '@/lib/haptics';
-import type {ItemDiffEntry} from '@/lib/markdown';
+import type {DiffStatus, ItemDiffEntry, SectionDiffEntry} from '@/lib/markdown';
 import {toast} from '@/lib/toast';
 import {useStacksStore} from '@/store/useStacksStore';
 
@@ -50,7 +50,12 @@ export default function ImportPreviewScreen() {
     setPendingImport(null);
     hapticSuccess();
     toast({
-      title: result.action === 'updated' ? 'Stack updated' : 'Stack imported',
+      title:
+        result.action === 'created'
+          ? 'Stack imported'
+          : result.action === 'replaced'
+            ? 'Stack replaced'
+            : 'Stack updated',
       preset: 'done',
     });
     router.dismiss();
@@ -58,11 +63,20 @@ export default function ImportPreviewScreen() {
   };
 
   const headerTitle =
-    preview.action === 'update' ? 'Confirm update' : 'Confirm import';
+    preview.action === 'create' ? 'Confirm import' : 'Confirm changes';
   const summary =
-    preview.action === 'update'
-      ? `Updating "${preview.existingTitle}" → "${preview.title}"`
-      : `Creating new stack "${preview.title}"`;
+    preview.action === 'create'
+      ? `Creating new stack "${preview.title}"`
+      : preview.action === 'replace'
+        ? `Replacing "${preview.existingTitle}" with the clipboard`
+        : `Updating "${preview.existingTitle}" → "${preview.title}"`;
+
+  const ctaLabel =
+    preview.action === 'create'
+      ? 'Create stack'
+      : preview.action === 'replace'
+        ? 'Replace'
+        : 'Apply changes';
 
   return (
     <SafeAreaView
@@ -94,24 +108,23 @@ export default function ImportPreviewScreen() {
           </View>
         </View>
 
-        <View className="mx-4 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 overflow-hidden">
-          {preview.diff.length === 0 ? (
-            <View className="px-4 py-6">
-              <Text className="text-sm text-neutral-500 dark:text-neutral-400 text-center">
-                No items in the imported markdown.
-              </Text>
-            </View>
-          ) : (
-            preview.diff.map((entry, idx) => (
-              <DiffRow
-                key={`${entry.status}-${idx}`}
-                entry={entry}
+        {preview.diff.length === 0 ? (
+          <View className="mx-4 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 px-4 py-6">
+            <Text className="text-sm text-neutral-500 dark:text-neutral-400 text-center">
+              No sections in the imported markdown.
+            </Text>
+          </View>
+        ) : (
+          <View className="px-4 gap-3">
+            {preview.diff.map((sec, idx) => (
+              <SectionCard
+                key={`${sec.status}-${idx}`}
+                section={sec}
                 isDark={isDark}
-                isLast={idx === preview.diff.length - 1}
               />
-            ))
-          )}
-        </View>
+            ))}
+          </View>
+        )}
 
         <View className="mx-4 mt-6 gap-2">
           <AnimatedPressable
@@ -119,7 +132,7 @@ export default function ImportPreviewScreen() {
             className="bg-brand-500 rounded-2xl h-12 items-center justify-center"
           >
             <Text className="text-white font-semibold text-base">
-              {preview.action === 'update' ? 'Apply changes' : 'Create stack'}
+              {ctaLabel}
             </Text>
           </AnimatedPressable>
           <AnimatedPressable
@@ -136,60 +149,85 @@ export default function ImportPreviewScreen() {
   );
 }
 
-function countByStatus(diff: ReadonlyArray<ItemDiffEntry>) {
-  return diff.reduce(
-    (acc, e) => {
-      acc[e.status] += 1;
-      return acc;
-    },
-    {unchanged: 0, changed: 0, added: 0, removed: 0}
-  );
+function countByStatus(diff: ReadonlyArray<SectionDiffEntry>) {
+  const acc = {unchanged: 0, changed: 0, added: 0, removed: 0};
+  for (const sec of diff) {
+    acc[sec.status] += 1;
+    for (const item of sec.items) {
+      acc[item.status] += 1;
+    }
+  }
+  return acc;
 }
 
-function CountChip({
-  label,
-  tone,
+function SectionCard({
+  section,
+  isDark,
 }: {
-  label: string;
-  tone: 'add' | 'change' | 'remove' | 'neutral';
+  section: SectionDiffEntry;
+  isDark: boolean;
 }) {
-  const tones = {
-    add: {
-      bg: 'bg-green-50 dark:bg-green-900/30',
-      text: 'text-green-700 dark:text-green-300',
-    },
-    change: {
-      bg: 'bg-brand-50 dark:bg-brand-900/40',
-      text: 'text-brand-700 dark:text-brand-300',
-    },
-    remove: {
-      bg: 'bg-red-50 dark:bg-red-900/20',
-      text: 'text-red-700 dark:text-red-300',
-    },
-    neutral: {
-      bg: 'bg-neutral-100 dark:bg-neutral-700',
-      text: 'text-neutral-600 dark:text-neutral-300',
-    },
-  } as const;
-  const {bg, text} = tones[tone];
+  const tones = sectionToneClasses(section.status);
+  const sectionLabel = sectionStatusLabel(section.status);
+  const headline = section.title.trim() || '(untitled section)';
+
   return (
-    <View className={`px-2.5 py-1 rounded-full ${bg}`}>
-      <Text className={`text-xs font-semibold ${text}`}>{label}</Text>
+    <View
+      className={`rounded-2xl border bg-white dark:bg-neutral-800 ${tones.border}`}
+    >
+      <View
+        className={`flex-row items-start gap-3 px-4 py-3 border-b border-neutral-100 dark:border-neutral-700`}
+      >
+        <View
+          className={`w-8 h-8 rounded-full items-center justify-center mt-0.5 ${tones.glyphBg}`}
+        >
+          {sectionGlyph(section.status, isDark)}
+        </View>
+        <View className="flex-1">
+          <Text
+            className="text-base font-semibold text-neutral-900 dark:text-white"
+            numberOfLines={2}
+          >
+            {headline}
+          </Text>
+          <Text className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+            {sectionLabel}
+          </Text>
+        </View>
+      </View>
+      {section.items.length === 0 ? (
+        <Text className="text-xs text-neutral-400 dark:text-neutral-500 px-4 py-3 italic">
+          No items in this section.
+        </Text>
+      ) : (
+        <View>
+          {section.items.map((item, idx) => (
+            <ItemRow
+              key={`${item.status}-${idx}`}
+              item={item}
+              isDark={isDark}
+              isLast={idx === section.items.length - 1}
+            />
+          ))}
+        </View>
+      )}
     </View>
   );
 }
 
-function DiffRow({
-  entry,
+function ItemRow({
+  item,
   isDark,
   isLast,
 }: {
-  entry: ItemDiffEntry;
+  item: ItemDiffEntry;
   isDark: boolean;
   isLast: boolean;
 }) {
-  const {icon, color, label} = statusGlyph(entry.status, isDark);
-  const headline = entry.headline || '(no headline)';
+  const tones = itemToneClasses(item.status);
+  const label = itemStatusLabel(item.status);
+  const headline = item.headline.trim() || '(no headline)';
+
   return (
     <View
       className={`flex-row items-start gap-3 px-4 py-3 ${
@@ -197,14 +235,13 @@ function DiffRow({
       }`}
     >
       <View
-        className="w-8 h-8 rounded-full items-center justify-center mt-0.5"
-        style={{backgroundColor: color.bg}}
+        className={`w-7 h-7 rounded-full items-center justify-center mt-0.5 ${tones.glyphBg}`}
       >
-        {icon}
+        {itemGlyph(item.status, isDark)}
       </View>
       <View className="flex-1">
         <Text
-          className="text-sm font-semibold text-neutral-900 dark:text-white"
+          className="text-sm font-medium text-neutral-900 dark:text-white"
           numberOfLines={2}
         >
           {headline}
@@ -217,34 +254,104 @@ function DiffRow({
   );
 }
 
-function statusGlyph(
-  status: ItemDiffEntry['status'],
-  isDark: boolean
-): {icon: React.ReactNode; color: {bg: string; fg: string}; label: string} {
+const TONE = {
+  add: {
+    glyphBg: 'bg-green-50 dark:bg-green-900/30',
+    border: 'border-green-200 dark:border-green-900/40',
+    chipBg: 'bg-green-50 dark:bg-green-900/30',
+    chipText: 'text-green-700 dark:text-green-300',
+  },
+  change: {
+    glyphBg: 'bg-brand-50 dark:bg-brand-900/40',
+    border: 'border-brand-200 dark:border-brand-800',
+    chipBg: 'bg-brand-50 dark:bg-brand-900/40',
+    chipText: 'text-brand-700 dark:text-brand-300',
+  },
+  remove: {
+    glyphBg: 'bg-red-50 dark:bg-red-900/20',
+    border: 'border-red-200 dark:border-red-900/30',
+    chipBg: 'bg-red-50 dark:bg-red-900/20',
+    chipText: 'text-red-700 dark:text-red-300',
+  },
+  neutral: {
+    glyphBg: 'bg-neutral-100 dark:bg-neutral-700',
+    border: 'border-neutral-100 dark:border-neutral-700',
+    chipBg: 'bg-neutral-100 dark:bg-neutral-700',
+    chipText: 'text-neutral-600 dark:text-neutral-300',
+  },
+} as const;
+
+function sectionToneClasses(status: DiffStatus) {
+  return TONE[statusToTone(status)];
+}
+function itemToneClasses(status: DiffStatus) {
+  return TONE[statusToTone(status)];
+}
+function statusToTone(status: DiffStatus): keyof typeof TONE {
+  if (status === 'added') return 'add';
+  if (status === 'changed') return 'change';
+  if (status === 'removed') return 'remove';
+  return 'neutral';
+}
+
+function sectionStatusLabel(status: DiffStatus): string {
   switch (status) {
     case 'added':
-      return {
-        icon: <Plus size={16} color={isDark ? '#86efac' : '#15803d'} />,
-        color: {bg: isDark ? '#14532d33' : '#dcfce7', fg: ''},
-        label: 'New item',
-      };
+      return 'New section';
     case 'removed':
-      return {
-        icon: <Minus size={16} color={isDark ? '#fca5a5' : '#b91c1c'} />,
-        color: {bg: isDark ? '#7f1d1d33' : '#fee2e2', fg: ''},
-        label: 'Will be removed',
-      };
+      return 'Will be removed';
     case 'changed':
-      return {
-        icon: <Pencil size={14} color={isDark ? '#fbbf24' : '#b45309'} />,
-        color: {bg: isDark ? '#78350f33' : '#fef3c7', fg: ''},
-        label: 'Body or headline changed',
-      };
+      return 'Section content changed';
     default:
-      return {
-        icon: <Check size={16} color={isDark ? '#a3a3a3' : '#737373'} />,
-        color: {bg: isDark ? '#3f3f46' : '#f5f5f5', fg: ''},
-        label: 'Unchanged',
-      };
+      return 'Unchanged';
   }
+}
+
+function itemStatusLabel(status: DiffStatus): string {
+  switch (status) {
+    case 'added':
+      return 'New item';
+    case 'removed':
+      return 'Will be removed';
+    case 'changed':
+      return 'Item content changed';
+    default:
+      return 'Unchanged';
+  }
+}
+
+function sectionGlyph(status: DiffStatus, isDark: boolean) {
+  return diffGlyph(status, isDark, 16);
+}
+
+function itemGlyph(status: DiffStatus, isDark: boolean) {
+  return diffGlyph(status, isDark, 14);
+}
+
+function diffGlyph(status: DiffStatus, isDark: boolean, size: number) {
+  switch (status) {
+    case 'added':
+      return <Plus size={size} color={isDark ? '#86efac' : '#15803d'} />;
+    case 'removed':
+      return <Minus size={size} color={isDark ? '#fca5a5' : '#b91c1c'} />;
+    case 'changed':
+      return <Pencil size={size - 2} color={isDark ? '#fbbf24' : '#b45309'} />;
+    default:
+      return <Check size={size} color={isDark ? '#a3a3a3' : '#737373'} />;
+  }
+}
+
+function CountChip({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: 'add' | 'change' | 'remove' | 'neutral';
+}) {
+  const t = TONE[tone];
+  return (
+    <View className={`px-2.5 py-1 rounded-full ${t.chipBg}`}>
+      <Text className={`text-xs font-semibold ${t.chipText}`}>{label}</Text>
+    </View>
+  );
 }

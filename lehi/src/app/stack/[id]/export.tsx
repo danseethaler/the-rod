@@ -11,11 +11,7 @@ import {ScreenHeader} from '@/components/ScreenHeader';
 import {hapticError, hapticSuccess} from '@/lib/haptics';
 import {bearCreateUrl, stackToMarkdown} from '@/lib/markdown';
 import {toast} from '@/lib/toast';
-import {
-  resolveStackItems,
-  selectStackById,
-  useStacksStore,
-} from '@/store/useStacksStore';
+import {selectStackById, useStacksStore} from '@/store/useStacksStore';
 
 export default function ExportScreen() {
   const {id} = useLocalSearchParams<{id: string}>();
@@ -24,14 +20,20 @@ export default function ExportScreen() {
   const isDark = colorScheme === 'dark';
 
   const stack = useStacksStore(selectStackById(id));
-  const allItems = useStacksStore((s) => s.items);
-  const items = useMemo(
-    () => resolveStackItems(stack, allItems),
-    [stack, allItems]
-  );
+  const allSections = useStacksStore(s => s.sections);
+  const allItems = useStacksStore(s => s.items);
+
+  const itemCount = useMemo(() => {
+    if (!stack) return 0;
+    return (stack.sectionIds ?? []).reduce((acc, sid) => {
+      const sec = allSections.find(s => s.id === sid);
+      return acc + (sec?.itemIds.length ?? 0);
+    }, 0);
+  }, [stack, allSections]);
+
   const md = useMemo(
-    () => (stack ? stackToMarkdown(stack, items) : ''),
-    [stack, items]
+    () => (stack ? stackToMarkdown(stack, allSections, allItems) : ''),
+    [stack, allSections, allItems]
   );
 
   if (!stack) {
@@ -68,8 +70,8 @@ export default function ExportScreen() {
       <ScrollView contentContainerStyle={{paddingBottom: 32}}>
         <View className="px-4">
           <Text className="text-base text-neutral-500 dark:text-neutral-400 mb-4 leading-6">
-            {stack.itemIds.length} item
-            {stack.itemIds.length === 1 ? '' : 's'} in{' '}
+            {itemCount} item
+            {itemCount === 1 ? '' : 's'} in{' '}
             <Text className="text-neutral-900 dark:text-white font-medium">
               {stack.title}
             </Text>

@@ -3,6 +3,7 @@ import {create} from 'zustand';
 import {newId} from '@/lib/ids';
 import {
   computeImportPreview,
+  computeReplacePreview,
   markdownToStack,
   type ImportPreview,
 } from '@/lib/markdown';
@@ -16,6 +17,7 @@ import {
 } from '@/lib/scripture';
 import {loadJson, saveJson, STORAGE_KEYS} from '@/lib/storage';
 import type {
+  Section,
   Stack,
   StackItem,
   StackItemNote,
@@ -32,11 +34,6 @@ function corpusIndex(): Map<string, Verse> {
   return CORPUS_INDEX;
 }
 
-/**
- * Given a multi-verse reference ("1 Nephi 3:7-9") and a known verse
- * number, find the matching corpus entry so we can recover chapter / book
- * / work metadata.
- */
 function matchByReferenceAndVerse(
   reference: string,
   verseNumber: number | undefined
@@ -46,17 +43,34 @@ function matchByReferenceAndVerse(
   return corpusIndex().get(`${chapterTitle}:${verseNumber}`);
 }
 
-/** Pull the chapter number out of a reference's chapter prefix — `"1 Nephi 3:7-9"` → 3. */
 function extractChapterFromReference(reference: string): number {
   const chapterTitle = chapterTitleFromReference(reference);
   const m = /(\d+)\s*$/.exec(chapterTitle);
   return m ? parseInt(m[1], 10) : 1;
 }
 
+/**
+ * App-level preferences persisted under `STORAGE_KEYS.prefs`. Keep this
+ * shape additive — old keys are ignored on hydrate, missing ones fall
+ * back to defaults.
+ */
+export interface AppPrefs {
+  /**
+   * Route name of the tab the user was last on. The tabs layout reads
+   * this once at mount to pick its initial route, and updates it on
+   * every focus event.
+   */
+  lastTab: 'index' | 'stacks' | 'settings';
+}
+
+const DEFAULT_PREFS: AppPrefs = {lastTab: 'index'};
+
 interface StacksState {
   hydrated: boolean;
   stacks: Stack[];
+  sections: Section[];
   items: StackItem[];
+  prefs: AppPrefs;
 
   // Transient — verses queued by the search flow that are about to be
   // dropped into a stack via the picker. Not persisted.
@@ -67,39 +81,38 @@ interface StacksState {
   pendingImport: ImportPreview | null;
 
   hydrate: () => Promise<void>;
+  setLastTab: (tab: AppPrefs['lastTab']) => void;
 
   // Stacks
   createStack: (title: string) => Stack;
   renameStack: (id: string, title: string) => void;
   setStackStatus: (id: string, status: StackStatus) => void;
   deleteStack: (id: string) => void;
-  reorderItems: (stackId: string, newOrder: string[]) => void;
+  reorderSections: (stackId: string, newOrder: string[]) => void;
 
-  // Items
-  /**
-   * Add one or more verses to a stack as a single grouped item. All verses
-   * must share standardWorkSlug + bookSlug + chapter; the caller enforces
-   * this (the verse-context view is per-chapter, and the search list adds
-   * a single verse at a time).
-   */
+  // Sections
+  createSection: (stackId: string, title?: string) => Section;
+  renameSection: (sectionId: string, title: string) => void;
+  setSectionBody: (sectionId: string, body: string) => void;
+  deleteSection: (sectionId: string) => void;
+  reorderItemsInSection: (sectionId: string, newOrder: string[]) => void;
+  moveItem: (
+    itemId: string,
+    fromSectionId: string,
+    toSectionId: string,
+    toIndex?: number
+  ) => void;
+
+  // Items — convenience wrappers route to the stack's first section.
+  // Section-targeted versions take an explicit sectionId.
   addVerseSetToStack: (stackId: string, verses: Verse[]) => StackItemVerse;
+  addVerseSetToSection: (sectionId: string, verses: Verse[]) => StackItemVerse;
   addNoteToStack: (stackId: string, body: string) => StackItemNote;
+  addNoteToSection: (sectionId: string, body: string) => StackItemNote;
   updateNoteBody: (itemId: string, body: string) => void;
   updateVerseThought: (itemId: string, thought: string) => void;
   updateHeadline: (itemId: string, headline: string) => void;
-  /**
-   * Replace the markdown text for a single verse inside a verse-set
-   * item. Caller is responsible for the markdown shape (the inline
-   * formatting & trim helpers in `lib/verseFormat.ts` produce the right
-   * thing).
-   */
   updateVerseText: (itemId: string, verseNumber: number, text: string) => void;
-  /**
-   * Restore one verse inside a verse-set to its canonical scripture
-   * text from the bundled corpus. No-op if the item or verse can't be
-   * found, or if no canonical text resolves (e.g. legacy migrated item
-   * with `standardWorkSlug === 'unknown'`).
-   */
   resetVerseText: (itemId: string, verseNumber: number) => void;
   removeItem: (itemId: string) => void;
 
@@ -109,56 +122,84 @@ interface StacksState {
 
   // Import / round-trip
   previewImport: (md: string) => ImportPreview;
+  previewReplace: (md: string, targetStackId: string) => ImportPreview;
   setPendingImport: (preview: ImportPreview | null) => void;
   applyImportPreview: (preview: ImportPreview) => ImportResult;
 }
 
 export interface ImportResult {
   stackId: string;
-  action: 'created' | 'updated';
+  action: 'created' | 'updated' | 'replaced';
   itemCount: number;
+  sectionCount: number;
 }
 
-const persist = (state: Pick<StacksState, 'stacks' | 'items'>) => {
+type PersistShape = Pick<StacksState, 'stacks' | 'sections' | 'items'>;
+
+const persist = (state: PersistShape) => {
   saveJson(STORAGE_KEYS.stacks, state.stacks).catch(() => {});
+  saveJson(STORAGE_KEYS.sections, state.sections).catch(() => {});
   saveJson(STORAGE_KEYS.stackItems, state.items).catch(() => {});
 };
 
 export const useStacksStore = create<StacksState>((set, get) => ({
   hydrated: false,
   stacks: [],
+  sections: [],
   items: [],
+  prefs: DEFAULT_PREFS,
   pendingVerses: [],
   pendingImport: null,
 
   hydrate: async () => {
-    const [stacks, rawItems] = await Promise.all([
+    const [rawStacks, sections, items, prefs] = await Promise.all([
       loadJson<Stack[]>(STORAGE_KEYS.stacks, []),
+      loadJson<Section[]>(STORAGE_KEYS.sections, []),
       loadJson<StackItem[]>(STORAGE_KEYS.stackItems, []),
+      loadJson<AppPrefs>(STORAGE_KEYS.prefs, DEFAULT_PREFS),
     ]);
-    const {items, migrated} = migrateItems(rawItems);
-    set({stacks, items, hydrated: true});
-    // If we rewrote any verse items into the new grouped shape, persist
-    // the migrated payload so we don't pay the migration cost on every
-    // launch (and so a future export uses the canonical fields).
-    if (migrated) {
-      persist({stacks, items});
-    }
+    // Defensive coercion — any persisted stack without `sectionIds` (e.g.
+    // a stack written by an in-flight pre-section build) loads with an
+    // empty array so `.reduce` / `.map` calls downstream don't crash.
+    const stacks = rawStacks.map(s => ({
+      ...s,
+      sectionIds: Array.isArray(s.sectionIds) ? s.sectionIds : [],
+    }));
+    // Merge against defaults so a stale persisted shape with missing
+    // keys still produces a complete prefs object.
+    const mergedPrefs: AppPrefs = {...DEFAULT_PREFS, ...prefs};
+    set({stacks, sections, items, prefs: mergedPrefs, hydrated: true});
+  },
+
+  setLastTab: tab => {
+    const prefs = {...get().prefs, lastTab: tab};
+    set({prefs});
+    saveJson(STORAGE_KEYS.prefs, prefs).catch(() => {});
   },
 
   createStack: title => {
     const now = Date.now();
-    const stack: Stack = {
+    const stackId = newId();
+    const defaultSection: Section = {
       id: newId(),
+      stackId,
+      title: '',
+      body: '',
+      itemIds: [],
+      createdAt: now,
+    };
+    const stack: Stack = {
+      id: stackId,
       title: title.trim() || 'Untitled stack',
       status: 'baking',
-      itemIds: [],
+      sectionIds: [defaultSection.id],
       createdAt: now,
       updatedAt: now,
     };
-    const next = {...get(), stacks: [stack, ...get().stacks]};
-    set({stacks: next.stacks});
-    persist({stacks: next.stacks, items: get().items});
+    const stacks = [stack, ...get().stacks];
+    const sections = [...get().sections, defaultSection];
+    set({stacks, sections});
+    persist({stacks, sections, items: get().items});
     return stack;
   },
 
@@ -169,7 +210,7 @@ export const useStacksStore = create<StacksState>((set, get) => ({
         : s
     );
     set({stacks});
-    persist({stacks, items: get().items});
+    persist({stacks, sections: get().sections, items: get().items});
   },
 
   setStackStatus: (id, status) => {
@@ -177,38 +218,144 @@ export const useStacksStore = create<StacksState>((set, get) => ({
       s.id === id ? {...s, status, updatedAt: Date.now()} : s
     );
     set({stacks});
-    persist({stacks, items: get().items});
+    persist({stacks, sections: get().sections, items: get().items});
   },
 
   deleteStack: id => {
+    const stack = get().stacks.find(s => s.id === id);
+    if (!stack) return;
     const stacks = get().stacks.filter(s => s.id !== id);
+    const sections = get().sections.filter(s => s.stackId !== id);
     const items = get().items.filter(i => i.stackId !== id);
-    set({stacks, items});
-    persist({stacks, items});
+    set({stacks, sections, items});
+    persist({stacks, sections, items});
   },
 
-  reorderItems: (stackId, newOrder) => {
+  reorderSections: (stackId, newOrder) => {
     const stacks = get().stacks.map(s =>
-      s.id === stackId ? {...s, itemIds: newOrder, updatedAt: Date.now()} : s
+      s.id === stackId ? {...s, sectionIds: newOrder, updatedAt: Date.now()} : s
     );
     set({stacks});
-    persist({stacks, items: get().items});
+    persist({stacks, sections: get().sections, items: get().items});
+  },
+
+  createSection: (stackId, title = '') => {
+    const now = Date.now();
+    const section: Section = {
+      id: newId(),
+      stackId,
+      title,
+      body: '',
+      itemIds: [],
+      createdAt: now,
+    };
+    const sections = [...get().sections, section];
+    const stacks = get().stacks.map(s =>
+      s.id === stackId
+        ? {...s, sectionIds: [...s.sectionIds, section.id], updatedAt: now}
+        : s
+    );
+    set({stacks, sections});
+    persist({stacks, sections, items: get().items});
+    return section;
+  },
+
+  renameSection: (sectionId, title) => {
+    const sections = get().sections.map(s =>
+      s.id === sectionId ? {...s, title} : s
+    );
+    set({sections});
+    bumpStackUpdatedAt(sectionId, get, set, persist);
+  },
+
+  setSectionBody: (sectionId, body) => {
+    const sections = get().sections.map(s =>
+      s.id === sectionId ? {...s, body} : s
+    );
+    set({sections});
+    bumpStackUpdatedAt(sectionId, get, set, persist);
+  },
+
+  deleteSection: sectionId => {
+    const section = get().sections.find(s => s.id === sectionId);
+    if (!section) return;
+    const stack = get().stacks.find(s => s.id === section.stackId);
+    if (!stack) return;
+    // A stack must always have at least one section; if this is the last
+    // one, refuse the delete silently.
+    if (stack.sectionIds.length <= 1) return;
+    const sections = get().sections.filter(s => s.id !== sectionId);
+    const items = get().items.filter(i => !section.itemIds.includes(i.id));
+    const stacks = get().stacks.map(s =>
+      s.id === stack.id
+        ? {
+            ...s,
+            sectionIds: s.sectionIds.filter(id => id !== sectionId),
+            updatedAt: Date.now(),
+          }
+        : s
+    );
+    set({stacks, sections, items});
+    persist({stacks, sections, items});
+  },
+
+  reorderItemsInSection: (sectionId, newOrder) => {
+    const sections = get().sections.map(s =>
+      s.id === sectionId ? {...s, itemIds: newOrder} : s
+    );
+    set({sections});
+    bumpStackUpdatedAt(sectionId, get, set, persist);
+  },
+
+  moveItem: (itemId, fromSectionId, toSectionId, toIndex) => {
+    if (fromSectionId === toSectionId) return;
+    const sections = get().sections.map(s => {
+      if (s.id === fromSectionId) {
+        return {...s, itemIds: s.itemIds.filter(id => id !== itemId)};
+      }
+      if (s.id === toSectionId) {
+        const next = [...s.itemIds];
+        const insertAt = toIndex == null ? next.length : toIndex;
+        next.splice(insertAt, 0, itemId);
+        return {...s, itemIds: next};
+      }
+      return s;
+    });
+    set({sections});
+    bumpStackUpdatedAt(toSectionId, get, set, persist);
   },
 
   addVerseSetToStack: (stackId, verses) => {
-    const item = buildVerseSetItem(stackId, verses);
+    const sectionId = firstSectionId(get(), stackId);
+    return get().addVerseSetToSection(sectionId, verses);
+  },
+
+  addVerseSetToSection: (sectionId, verses) => {
+    const section = get().sections.find(s => s.id === sectionId);
+    if (!section) {
+      throw new Error(`addVerseSetToSection: section ${sectionId} not found`);
+    }
+    const item = buildVerseSetItem(section.stackId, verses);
     const items = [...get().items, item];
-    const stacks = get().stacks.map(s =>
-      s.id === stackId
-        ? {...s, itemIds: [...s.itemIds, item.id], updatedAt: Date.now()}
-        : s
+    const sections = get().sections.map(s =>
+      s.id === sectionId ? {...s, itemIds: [...s.itemIds, item.id]} : s
     );
-    set({items, stacks});
-    persist({stacks, items});
+    const stacks = touchStackUpdatedAt(get().stacks, section.stackId);
+    set({stacks, sections, items});
+    persist({stacks, sections, items});
     return item;
   },
 
   addNoteToStack: (stackId, body) => {
+    const sectionId = firstSectionId(get(), stackId);
+    return get().addNoteToSection(sectionId, body);
+  },
+
+  addNoteToSection: (sectionId, body) => {
+    const section = get().sections.find(s => s.id === sectionId);
+    if (!section) {
+      throw new Error(`addNoteToSection: section ${sectionId} not found`);
+    }
     const trimmed = body.trim();
     const headline =
       trimmed
@@ -217,20 +364,19 @@ export const useStacksStore = create<StacksState>((set, get) => ({
         ?.trim() || 'Note';
     const item: StackItemNote = {
       id: newId(),
-      stackId,
+      stackId: section.stackId,
       kind: 'note',
       headline,
       body: trimmed,
       createdAt: Date.now(),
     };
     const items = [...get().items, item];
-    const stacks = get().stacks.map(s =>
-      s.id === stackId
-        ? {...s, itemIds: [...s.itemIds, item.id], updatedAt: Date.now()}
-        : s
+    const sections = get().sections.map(s =>
+      s.id === sectionId ? {...s, itemIds: [...s.itemIds, item.id]} : s
     );
-    set({items, stacks});
-    persist({stacks, items});
+    const stacks = touchStackUpdatedAt(get().stacks, section.stackId);
+    set({stacks, sections, items});
+    persist({stacks, sections, items});
     return item;
   },
 
@@ -239,7 +385,7 @@ export const useStacksStore = create<StacksState>((set, get) => ({
       i.id === itemId && i.kind === 'note' ? {...i, body} : i
     );
     set({items});
-    persist({stacks: get().stacks, items});
+    persist({stacks: get().stacks, sections: get().sections, items});
   },
 
   updateVerseThought: (itemId, thought) => {
@@ -247,7 +393,7 @@ export const useStacksStore = create<StacksState>((set, get) => ({
       i.id === itemId && i.kind === 'verse' ? {...i, thought} : i
     );
     set({items});
-    persist({stacks: get().stacks, items});
+    persist({stacks: get().stacks, sections: get().sections, items});
   },
 
   updateHeadline: (itemId, headline) => {
@@ -255,7 +401,7 @@ export const useStacksStore = create<StacksState>((set, get) => ({
       i.id === itemId ? {...i, headline} : i
     );
     set({items});
-    persist({stacks: get().stacks, items});
+    persist({stacks: get().stacks, sections: get().sections, items});
   },
 
   updateVerseText: (itemId, verseNumber, text) => {
@@ -263,13 +409,11 @@ export const useStacksStore = create<StacksState>((set, get) => ({
       if (i.id !== itemId || i.kind !== 'verse') return i;
       return {
         ...i,
-        verses: i.verses.map(v =>
-          v.verse === verseNumber ? {...v, text} : v
-        ),
+        verses: i.verses.map(v => (v.verse === verseNumber ? {...v, text} : v)),
       };
     });
     set({items});
-    persist({stacks: get().stacks, items});
+    persist({stacks: get().stacks, sections: get().sections, items});
   },
 
   resetVerseText: (itemId, verseNumber) => {
@@ -292,24 +436,21 @@ export const useStacksStore = create<StacksState>((set, get) => ({
       };
     });
     set({items});
-    persist({stacks: get().stacks, items});
+    persist({stacks: get().stacks, sections: get().sections, items});
   },
 
   removeItem: itemId => {
     const item = get().items.find(i => i.id === itemId);
     if (!item) return;
     const items = get().items.filter(i => i.id !== itemId);
-    const stacks = get().stacks.map(s =>
-      s.id === item.stackId
-        ? {
-            ...s,
-            itemIds: s.itemIds.filter(id => id !== itemId),
-            updatedAt: Date.now(),
-          }
+    const sections = get().sections.map(s =>
+      s.itemIds.includes(itemId)
+        ? {...s, itemIds: s.itemIds.filter(id => id !== itemId)}
         : s
     );
-    set({items, stacks});
-    persist({stacks, items});
+    const stacks = touchStackUpdatedAt(get().stacks, item.stackId);
+    set({stacks, sections, items});
+    persist({stacks, sections, items});
   },
 
   setPendingVerses: verses => {
@@ -322,7 +463,26 @@ export const useStacksStore = create<StacksState>((set, get) => ({
 
   previewImport: md => {
     const parsed = markdownToStack(md);
-    return computeImportPreview(parsed, get().stacks, get().items, newId);
+    return computeImportPreview(parsed, {
+      stacks: get().stacks,
+      sections: get().sections,
+      items: get().items,
+      generateId: newId,
+    });
+  },
+
+  previewReplace: (md, targetStackId) => {
+    const parsed = markdownToStack(md);
+    const target = get().stacks.find(s => s.id === targetStackId);
+    if (!target) {
+      throw new Error(`previewReplace: stack ${targetStackId} not found`);
+    }
+    return computeReplacePreview(parsed, target, {
+      stacks: get().stacks,
+      sections: get().sections,
+      items: get().items,
+      generateId: newId,
+    });
   },
 
   setPendingImport: preview => {
@@ -334,6 +494,42 @@ export const useStacksStore = create<StacksState>((set, get) => ({
   },
 }));
 
+function firstSectionId(state: StacksState, stackId: string): string {
+  const stack = state.stacks.find(s => s.id === stackId);
+  if (!stack || stack.sectionIds.length === 0) {
+    throw new Error(
+      `firstSectionId: stack ${stackId} has no sections — every stack should have at least one`
+    );
+  }
+  return stack.sectionIds[0];
+}
+
+function touchStackUpdatedAt(stacks: Stack[], stackId: string): Stack[] {
+  return stacks.map(s =>
+    s.id === stackId ? {...s, updatedAt: Date.now()} : s
+  );
+}
+
+function bumpStackUpdatedAt(
+  sectionId: string,
+  get: () => StacksState,
+  set: (partial: Partial<StacksState>) => void,
+  persistFn: (state: PersistShape) => void
+): void {
+  const section = get().sections.find(s => s.id === sectionId);
+  if (!section) {
+    persistFn({
+      stacks: get().stacks,
+      sections: get().sections,
+      items: get().items,
+    });
+    return;
+  }
+  const stacks = touchStackUpdatedAt(get().stacks, section.stackId);
+  set({stacks});
+  persistFn({stacks, sections: get().sections, items: get().items});
+}
+
 function applyImport(
   preview: ImportPreview,
   get: () => StacksState,
@@ -341,62 +537,82 @@ function applyImport(
 ): ImportResult {
   const now = Date.now();
   const existingStack = get().stacks.find(s => s.id === preview.targetStackId);
-  const existingItems = existingStack
-    ? get().items.filter(i => i.stackId === existingStack.id)
-    : [];
 
-  const newItems: StackItem[] = preview.parsed.items.map(p => {
-    // Reuse the existing item's id + createdAt when we can match by ID;
-    // that way unchanged items stay unchanged in storage.
-    const matched = p.sourceItemId
-      ? existingItems.find(i => i.id === p.sourceItemId)
-      : undefined;
+  // Build new sections + items from the parsed payload. Authoritative
+  // replacement — the imported markdown wins.
+  const builtSections: Section[] = [];
+  const builtItems: StackItem[] = [];
 
-    const id = matched?.id ?? newId();
-    const createdAt = matched?.createdAt ?? now;
-
-    if (p.kind === 'verse') {
-      // Imported markdown gives us reference + per-verse text but not the
-      // chapter / book / work metadata. Look up the first verse against
-      // the bundled corpus to recover that context. If the lookup fails
-      // (hand-edited reference, unrecognized standard work), we still
-      // store the item — it just won't have a working `Open` deep link.
-      const found = matchByReferenceAndVerse(p.reference, p.verses[0]?.verse);
-      const item: StackItemVerse = {
-        id,
-        stackId: preview.targetStackId,
-        kind: 'verse',
-        headline: p.headline,
-        reference: p.reference,
-        url: p.url,
-        standardWorkSlug: found?.standardWorkSlug ?? 'unknown',
-        bookSlug: found?.bookSlug,
-        chapter: found?.chapter ?? extractChapterFromReference(p.reference),
-        verses: [...p.verses].sort((a, b) => a.verse - b.verse),
-        thought: p.thought,
-        createdAt,
-      };
-      return item;
-    }
-    const item: StackItemNote = {
-      id,
+  for (const ps of preview.parsed.sections) {
+    const section: Section = {
+      id: newId(),
       stackId: preview.targetStackId,
-      kind: 'note',
-      headline: p.headline,
-      body: p.body,
-      createdAt,
+      title: ps.title,
+      body: ps.body,
+      itemIds: [],
+      createdAt: now,
     };
-    return item;
-  });
+    for (const p of ps.items) {
+      const itemId = newId();
+      section.itemIds.push(itemId);
+      if (p.kind === 'verse') {
+        const found = matchByReferenceAndVerse(p.reference, p.verses[0]?.verse);
+        const item: StackItemVerse = {
+          id: itemId,
+          stackId: preview.targetStackId,
+          kind: 'verse',
+          headline: p.headline,
+          reference: p.reference,
+          url: p.url,
+          standardWorkSlug: found?.standardWorkSlug ?? 'unknown',
+          bookSlug: found?.bookSlug,
+          chapter: found?.chapter ?? extractChapterFromReference(p.reference),
+          verses: [...p.verses].sort((a, b) => a.verse - b.verse),
+          thought: p.thought,
+          createdAt: now,
+        };
+        builtItems.push(item);
+      } else {
+        const item: StackItemNote = {
+          id: itemId,
+          stackId: preview.targetStackId,
+          kind: 'note',
+          headline: p.headline,
+          body: p.body,
+          createdAt: now,
+        };
+        builtItems.push(item);
+      }
+    }
+    // A stack always has at least one section; if the parsed payload had
+    // none, we still want one default. Builder iterates parsed.sections, so
+    // an empty parsed yields zero — handled below.
+    builtSections.push(section);
+  }
 
-  // Authoritative replacement: drop any prior items belonging to this stack.
+  if (builtSections.length === 0) {
+    builtSections.push({
+      id: newId(),
+      stackId: preview.targetStackId,
+      title: '',
+      body: '',
+      itemIds: [],
+      createdAt: now,
+    });
+  }
+
+  // Drop any prior data scoped to this stack — sections + items wholesale.
+  const otherSections = get().sections.filter(
+    s => s.stackId !== preview.targetStackId
+  );
   const otherItems = get().items.filter(
     i => i.stackId !== preview.targetStackId
   );
-  const items = [...otherItems, ...newItems];
+  const sections = [...otherSections, ...builtSections];
+  const items = [...otherItems, ...builtItems];
 
   let stacks: Stack[];
-  let action: 'created' | 'updated';
+  let action: 'created' | 'updated' | 'replaced';
 
   if (existingStack) {
     stacks = get().stacks.map(s =>
@@ -404,18 +620,18 @@ function applyImport(
         ? {
             ...s,
             title: preview.title,
-            itemIds: newItems.map(i => i.id),
+            sectionIds: builtSections.map(sec => sec.id),
             updatedAt: now,
           }
         : s
     );
-    action = 'updated';
+    action = preview.action === 'replace' ? 'replaced' : 'updated';
   } else {
     const newStack: Stack = {
       id: preview.targetStackId,
       title: preview.title,
       status: 'baking',
-      itemIds: newItems.map(i => i.id),
+      sectionIds: builtSections.map(sec => sec.id),
       createdAt: now,
       updatedAt: now,
     };
@@ -423,13 +639,14 @@ function applyImport(
     action = 'created';
   }
 
-  set({stacks, items});
-  persist({stacks, items});
+  set({stacks, sections, items});
+  persist({stacks, sections, items});
 
   return {
     stackId: preview.targetStackId,
     action,
-    itemCount: newItems.length,
+    itemCount: builtItems.length,
+    sectionCount: builtSections.length,
   };
 }
 
@@ -439,8 +656,6 @@ function buildVerseSetItem(stackId: string, verses: Verse[]): StackItemVerse {
   }
   const sorted = [...verses].sort((a, b) => a.verse - b.verse);
   const first = sorted[0];
-  // Same-chapter invariant. Caller (picker / verse-context view) guarantees
-  // it; we trust it here and don't filter, so a violation throws loudly.
   for (const v of sorted) {
     if (
       v.standardWorkSlug !== first.standardWorkSlug ||
@@ -473,95 +688,6 @@ function buildVerseSetItem(stackId: string, verses: Verse[]): StackItemVerse {
   };
 }
 
-/**
- * One-shot migration from the pre-grouped verse shape (single `verseText`
- * field, no `verses` array) to the v2 verse-set shape. Looks up the
- * reference against the bundled corpus to fill in chapter / book / work
- * metadata. Items already in the new shape pass through untouched.
- */
-function migrateItems(rawItems: StackItem[]): {
-  items: StackItem[];
-  migrated: boolean;
-} {
-  let migrated = false;
-  let bundleIndex: Map<string, Verse> | null = null;
-
-  const items = rawItems.map(item => {
-    if (item.kind !== 'verse') return item;
-    if (Array.isArray((item as StackItemVerse).verses)) return item;
-
-    migrated = true;
-    if (!bundleIndex) {
-      bundleIndex = new Map();
-      for (const v of allVerses()) bundleIndex.set(v.reference, v);
-    }
-    return migrateLegacyVerseItem(item as unknown as LegacyVerseItem, bundleIndex);
-  });
-
-  return {items, migrated};
-}
-
-interface LegacyVerseItem {
-  id: string;
-  stackId: string;
-  kind: 'verse';
-  headline?: string;
-  reference: string;
-  url?: string;
-  /** Old shape: single verse text. May also be `text` on very old data. */
-  verseText?: string;
-  text?: string;
-  thought?: string;
-  createdAt: number;
-}
-
-function migrateLegacyVerseItem(
-  legacy: LegacyVerseItem,
-  bundleIndex: Map<string, Verse>
-): StackItemVerse {
-  const reference = legacy.reference;
-  const verseText = legacy.verseText ?? legacy.text ?? '';
-  const found = bundleIndex.get(reference);
-
-  if (found) {
-    return {
-      id: legacy.id,
-      stackId: legacy.stackId,
-      kind: 'verse',
-      headline: legacy.headline?.trim() || reference,
-      reference,
-      url: buildVerseSetUrl([found]),
-      standardWorkSlug: found.standardWorkSlug,
-      bookSlug: found.bookSlug,
-      chapter: found.chapter,
-      verses: [{verse: found.verse, text: verseText || found.text}],
-      thought: legacy.thought ?? '',
-      createdAt: legacy.createdAt,
-    };
-  }
-
-  // Fall back to parsing chapter:verse out of the reference string. Any
-  // item that lands here will still display, but Open will use the legacy
-  // URL (if any) and the verse number is best-effort.
-  const m = /(\d+):(\d+)\s*$/.exec(reference);
-  const chapter = m ? parseInt(m[1], 10) : 1;
-  const verseNum = m ? parseInt(m[2], 10) : 1;
-  return {
-    id: legacy.id,
-    stackId: legacy.stackId,
-    kind: 'verse',
-    headline: legacy.headline?.trim() || reference,
-    reference,
-    url: legacy.url ?? '',
-    standardWorkSlug: 'unknown',
-    bookSlug: undefined,
-    chapter,
-    verses: [{verse: verseNum, text: verseText}],
-    thought: legacy.thought ?? '',
-    createdAt: legacy.createdAt,
-  };
-}
-
 // Selectors
 export const selectStackById =
   (id: string) =>
@@ -569,18 +695,29 @@ export const selectStackById =
     s.stacks.find(stack => stack.id === id);
 
 /**
- * Resolve a stack's items in order. Pure helper — call from a `useMemo` in
- * the component so the array reference is stable across renders that don't
- * actually change the data. Do NOT pass this to `useStacksStore(...)`
- * directly — Zustand's strict-equality default would see a new array each
- * render and trigger an infinite update loop.
+ * Resolve a stack's sections, in order. Pure helper — call from a
+ * `useMemo` in the component for stable refs.
  */
-export function resolveStackItems(
+export function resolveStackSections(
   stack: Stack | undefined,
+  allSections: Section[]
+): Section[] {
+  if (!stack) return [];
+  return stack.sectionIds
+    .map(id => allSections.find(s => s.id === id))
+    .filter((s): s is Section => s != null);
+}
+
+/**
+ * Resolve a single section's items, in order. Pure helper — call from a
+ * `useMemo` for stable refs.
+ */
+export function resolveSectionItems(
+  section: Section | undefined,
   allItems: StackItem[]
 ): StackItem[] {
-  if (!stack) return [];
-  return stack.itemIds
-    .map(iid => allItems.find(i => i.id === iid))
+  if (!section) return [];
+  return section.itemIds
+    .map(id => allItems.find(i => i.id === id))
     .filter((i): i is StackItem => i != null);
 }

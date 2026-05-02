@@ -60,7 +60,7 @@ export default function StacksScreen() {
       edges={['top', 'left', 'right']}
       className="flex-1 bg-neutral-50 dark:bg-neutral-900"
     >
-      <View className="flex-row items-center px-4 py-3">
+      <View className="flex-row items-center px-5 pt-2 pb-3">
         <View className="flex-1">
           <Text className="text-3xl font-semibold text-neutral-900 dark:text-white tracking-tight">
             Stacks
@@ -125,7 +125,11 @@ export default function StacksScreen() {
 
 function StackRow({stack}: {stack: Stack}) {
   const router = useRouter();
-  const itemCount = stack.itemIds.length;
+  const sections = useStacksStore(s => s.sections);
+  const itemCount = (stack.sectionIds ?? []).reduce((acc, sid) => {
+    const section = sections.find(s => s.id === sid);
+    return acc + (section?.itemIds.length ?? 0);
+  }, 0);
   const onPress = () => {
     hapticLight();
     router.push({pathname: '/stack/[id]', params: {id: stack.id}});

@@ -1,4 +1,4 @@
-import {FileText, Plus, Search} from 'lucide-react-native';
+import {FileText, FolderPlus, Plus, Search} from 'lucide-react-native';
 import {useColorScheme} from 'nativewind';
 import React, {useCallback} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
@@ -15,8 +15,9 @@ import Animated, {
 import {hapticMedium, hapticSelection} from '@/lib/haptics';
 
 const FAB_SIZE = 56;
-const ITEM_SIZE = 48;
-const ARC_RADIUS = 92;
+const ROW_HEIGHT = 48;
+const ROW_GAP = 10;
+const ROW_OFFSET_BASE = FAB_SIZE + 18; // distance from FAB top to first row's bottom
 
 const expandTiming = {duration: 220, easing: Easing.out(Easing.cubic)};
 const collapseTiming = {duration: 160, easing: Easing.in(Easing.cubic)};
@@ -27,27 +28,32 @@ interface FabAction {
   key: string;
   label: string;
   icon: typeof Plus;
-  /** Angle from the FAB center, in radians. 90° = straight up, 180° = left. */
-  angle: number;
   onPress: () => void;
 }
 
 interface Props {
-  /** Hide the FAB entirely (e.g. when a modal action bar is visible). */
   hidden?: boolean;
+  onAddSection: () => void;
   onAddVerse: () => void;
   onAddThought: () => void;
 }
 
 /**
- * Bottom-right FAB that fans out into two labeled actions on tap. Modeled
- * after Pday's `CenterPlusButton` but scaled down for two items at a corner.
+ * Bottom-right FAB that opens a vertical stack of labeled actions when
+ * tapped. Three actions for the stack-detail screen — add a section,
+ * search a verse, capture a thought. Modeled loosely on iOS share sheets:
+ * pill-shaped rows with the icon on the right and the label flush left,
+ * stacked above the FAB with a scrim covering the rest of the screen.
  *
- * The menu items fan upward and to the left from the FAB; the FAB itself
- * rotates 45° (Plus → X) when open, and a scrim dims the rest of the
- * screen so the open menu reads as modal.
+ * Reduced-motion aware: when on, the menu and press scales toggle
+ * instantly without timing animations.
  */
-export function StackActionFab({hidden, onAddVerse, onAddThought}: Props) {
+export function StackActionFab({
+  hidden,
+  onAddSection,
+  onAddVerse,
+  onAddThought,
+}: Props) {
   const {colorScheme} = useColorScheme();
   const isDark = colorScheme === 'dark';
   const reduceMotion = useReducedMotion();
@@ -75,26 +81,32 @@ export function StackActionFab({hidden, onAddVerse, onAddThought}: Props) {
     (action: FabAction) => {
       hapticSelection();
       close();
-      // Small delay so the close animation begins visibly before navigation.
+      // Tiny delay so the close animation begins before navigation /
+      // create-section fires.
       setTimeout(() => action.onPress(), 120);
     },
     [close]
   );
 
+  // Order: closest to the FAB first (read top-down: section, verse, thought).
   const actions: FabAction[] = [
     {
       key: 'thought',
       label: 'Add a thought',
       icon: FileText,
-      angle: (90 * Math.PI) / 180,
       onPress: onAddThought,
     },
     {
       key: 'verse',
       label: 'Search for a verse',
       icon: Search,
-      angle: (150 * Math.PI) / 180,
       onPress: onAddVerse,
+    },
+    {
+      key: 'section',
+      label: 'Add a section',
+      icon: FolderPlus,
+      onPress: onAddSection,
     },
   ];
 
@@ -114,7 +126,6 @@ export function StackActionFab({hidden, onAddVerse, onAddThought}: Props) {
 
   return (
     <>
-      {/* Scrim — covers the whole screen so taps outside the menu close it. */}
       <Animated.View
         pointerEvents="box-none"
         style={[
@@ -128,15 +139,16 @@ export function StackActionFab({hidden, onAddVerse, onAddThought}: Props) {
         <Pressable style={StyleSheet.absoluteFill} onPress={close} />
       </Animated.View>
 
-      {/* FAB anchor — items fan from the FAB's center. */}
       <View style={styles.anchor} pointerEvents="box-none">
         {actions.map((action, idx) => (
-          <FanItem
+          <StackedRow
             key={action.key}
             action={action}
             index={idx}
             progress={progress}
             onSelect={handleSelect}
+            isDark={isDark}
+            reduceMotion={reduceMotion}
           />
         ))}
 
@@ -147,9 +159,7 @@ export function StackActionFab({hidden, onAddVerse, onAddThought}: Props) {
               : withTiming(0.9, pressDownTiming);
           }}
           onPressOut={() => {
-            buttonScale.value = reduceMotion
-              ? 1
-              : withTiming(1, pressUpTiming);
+            buttonScale.value = reduceMotion ? 1 : withTiming(1, pressUpTiming);
           }}
           onPress={toggle}
           accessibilityLabel="Add to stack"
@@ -164,95 +174,85 @@ export function StackActionFab({hidden, onAddVerse, onAddThought}: Props) {
   );
 }
 
-function FanItem({
+function StackedRow({
   action,
   index,
   progress,
   onSelect,
+  isDark,
+  reduceMotion,
 }: {
   action: FabAction;
   index: number;
   progress: SharedValue<number>;
   onSelect: (action: FabAction) => void;
+  isDark: boolean;
+  reduceMotion: boolean;
 }) {
-  const {colorScheme} = useColorScheme();
-  const isDark = colorScheme === 'dark';
-  const reduceMotion = useReducedMotion();
+  // Vertical offset: row 0 sits directly above the FAB; subsequent rows
+  // stack above with `ROW_HEIGHT + ROW_GAP` spacing. dy is negative because
+  // we move upward in screen coordinates.
+  const dy = -(ROW_OFFSET_BASE + index * (ROW_HEIGHT + ROW_GAP));
 
-  // Standard math: dx = cos·r, dy = -sin·r (sin negated because screen Y is
-  // flipped). For our bottom-right FAB the action angles live in the upper
-  // half (90°-180°), so cos goes negative — items move LEFT and UP.
-  const dx = Math.cos(action.angle) * ARC_RADIUS;
-  const dy = -Math.sin(action.angle) * ARC_RADIUS;
   const scale = useSharedValue(1);
 
   const wrapStyle = useAnimatedStyle(() => {
-    const stagger = index * 0.08;
+    const stagger = index * 0.07;
     const itemProgress = Math.max(
       0,
       Math.min(1, (progress.value - stagger) / (1 - stagger))
     );
     return {
-      opacity: interpolate(itemProgress, [0, 0.4, 1], [0, 0.8, 1]),
+      opacity: interpolate(itemProgress, [0, 0.4, 1], [0, 0.85, 1]),
       transform: [
-        {translateX: interpolate(itemProgress, [0, 1], [0, dx])},
         {translateY: interpolate(itemProgress, [0, 1], [0, dy])},
-        {scale: interpolate(itemProgress, [0, 1], [0.3, 1]) * scale.value},
+        {scale: interpolate(itemProgress, [0, 1], [0.9, 1]) * scale.value},
       ],
-    };
-  });
-
-  const labelStyle = useAnimatedStyle(() => {
-    const stagger = index * 0.08;
-    const itemProgress = Math.max(
-      0,
-      Math.min(1, (progress.value - stagger) / (1 - stagger))
-    );
-    return {
-      opacity: interpolate(itemProgress, [0.6, 1], [0, 1]),
     };
   });
 
   const Icon = action.icon;
 
   return (
-    <Animated.View style={[styles.fanItem, wrapStyle]}>
+    <Animated.View style={[styles.row, wrapStyle]}>
       <Pressable
         onPressIn={() => {
-          scale.value = reduceMotion
-            ? 0.88
-            : withTiming(0.88, pressDownTiming);
+          scale.value = reduceMotion ? 0.96 : withTiming(0.96, pressDownTiming);
         }}
         onPressOut={() => {
           scale.value = reduceMotion ? 1 : withTiming(1, pressUpTiming);
         }}
         onPress={() => onSelect(action)}
-        style={{alignItems: 'center'}}
+        accessibilityLabel={action.label}
+        style={[
+          styles.rowInner,
+          {
+            backgroundColor: isDark ? '#262626' : '#ffffff',
+            shadowColor: '#000',
+            shadowOffset: {width: 0, height: 6},
+            shadowOpacity: isDark ? 0.55 : 0.18,
+            shadowRadius: 14,
+            elevation: 10,
+          },
+        ]}
       >
-        <View
-          style={[
-            styles.itemCircle,
-            {
-              backgroundColor: isDark ? '#fafafa' : '#ffffff',
-              shadowColor: '#000',
-              shadowOffset: {width: 0, height: 6},
-              shadowOpacity: isDark ? 0.5 : 0.18,
-              shadowRadius: 12,
-              elevation: 10,
-            },
-          ]}
-        >
-          <Icon size={22} color="#b45309" strokeWidth={2} />
-        </View>
-        <Animated.Text
-          style={[
-            styles.itemLabel,
-            {color: isDark ? '#f5f5f5' : '#ffffff'},
-            labelStyle,
-          ]}
+        <Text
+          style={[styles.rowLabel, {color: isDark ? '#f5f5f5' : '#171717'}]}
         >
           {action.label}
-        </Animated.Text>
+        </Text>
+        <View
+          style={[
+            styles.rowIconWrap,
+            {backgroundColor: isDark ? '#78350f' : '#fef3c7'},
+          ]}
+        >
+          <Icon
+            size={18}
+            color={isDark ? '#fbbf24' : '#b45309'}
+            strokeWidth={2}
+          />
+        </View>
       </Pressable>
     </Animated.View>
   );
@@ -265,8 +265,8 @@ const styles = StyleSheet.create({
     bottom: 32,
     width: FAB_SIZE,
     height: FAB_SIZE,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'flex-end',
+    justifyContent: 'flex-end',
   },
   fab: {
     width: FAB_SIZE,
@@ -281,22 +281,32 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 10,
   },
-  fanItem: {
+  row: {
     position: 'absolute',
-    alignItems: 'center',
-  },
-  itemCircle: {
-    width: ITEM_SIZE,
-    height: ITEM_SIZE,
-    borderRadius: ITEM_SIZE / 2,
-    alignItems: 'center',
+    right: 0,
+    bottom: 0,
+    height: ROW_HEIGHT,
+    alignItems: 'flex-end',
     justifyContent: 'center',
   },
-  itemLabel: {
-    marginTop: 6,
-    fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'center',
-    width: 110,
+  rowInner: {
+    height: ROW_HEIGHT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 16,
+    paddingRight: 8,
+    borderRadius: ROW_HEIGHT / 2,
+  },
+  rowLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  rowIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
   },
 });
