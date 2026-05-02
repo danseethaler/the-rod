@@ -1,4 +1,5 @@
-import type {Stack, StackItem} from '@/lib/types';
+import {buildMarkdownBlockquoteForSet} from '@/lib/scripture';
+import type {Stack, StackItem, VerseRef} from '@/lib/types';
 
 /**
  * Marker emitted at the top of every export, so a clipboard re-import can
@@ -9,8 +10,23 @@ const STACK_MARKER_RE = /<!--\s*krumb:stack:([^\s>]+)\s*-->/;
 /** Marker emitted before each `## ` heading, carrying the item's stable ID. */
 const ITEM_MARKER_RE = /<!--\s*krumb:item:([^\s>]+)\s*-->/;
 
-/** Matches a verse blockquote line: `> [ref](url) — text` */
-const VERSE_LINE_RE = /^>\s*\[([^\]]+)\]\(([^)]+)\)\s*[—-]\s*(.+)$/;
+/**
+ * Verse header line — `> [ref](url)` with no trailing text. The verse-set
+ * export emits this on its own line, with each individual verse on a
+ * subsequent `> N — text` line.
+ */
+const VERSE_HEADER_RE = /^>\s*\[([^\]]+)\]\(([^)]+)\)\s*$/;
+
+/**
+ * Per-verse blockquote line within a verse set: `> 7 — text` or `> 7. text`.
+ */
+const VERSE_BODY_RE = /^>\s*(\d+)\s*[—\-.]\s*(.+)$/;
+
+/**
+ * Legacy single-line verse blockquote: `> [ref](url) — text`. Still parsed
+ * for backward compatibility with markdown exported by older versions.
+ */
+const LEGACY_VERSE_LINE_RE = /^>\s*\[([^\]]+)\]\(([^)]+)\)\s*[—-]\s*(.+)$/;
 
 /**
  * Render a stack to Bear-friendly markdown. Output is layout-driven — no
@@ -38,7 +54,7 @@ export function stackToMarkdown(stack: Stack, items: StackItem[]): string {
     parts.push(`<!-- krumb:item:${item.id} -->`);
     parts.push(`## ${headline}`, '');
     if (item.kind === 'verse') {
-      parts.push(`> [${item.reference}](${item.url}) — ${item.verseText}`, '');
+      parts.push(buildMarkdownBlockquoteForSet(item), '');
       const thought = item.thought.trim();
       if (thought) parts.push(thought, '');
     } else {
@@ -75,7 +91,11 @@ export interface ParsedVerseItem {
   headline: string;
   reference: string;
   url: string;
-  verseText: string;
+  /**
+   * Sorted ascending by `verse`. Always non-empty for a parsed verse item.
+   * Legacy single-line markdown produces a one-element array with verse=1.
+   */
+  verses: VerseRef[];
   thought: string;
 }
 
@@ -172,28 +192,75 @@ function parseSection(
   body: string,
   sourceItemId: string | undefined
 ): ParsedStackItem {
-  const firstNonEmpty = body.split('\n').find(l => l.trim().length > 0) ?? '';
-  const verseMatch = VERSE_LINE_RE.exec(firstNonEmpty.trim());
+  const lines = body.split('\n');
+  const firstNonEmptyIdx = lines.findIndex(l => l.trim().length > 0);
+  const firstNonEmpty = firstNonEmptyIdx >= 0 ? lines[firstNonEmptyIdx].trim() : '';
 
-  if (verseMatch) {
-    const [, reference, url, text] = verseMatch;
-    // Anything after the blockquote line is the user's thought.
-    const lines = body.split('\n');
-    const verseLineIdx = lines.findIndex(
-      l => l.trim() === firstNonEmpty.trim()
-    );
-    const thought = lines
-      .slice(verseLineIdx + 1)
-      .join('\n')
-      .trim();
-
+  // Try v2 verse-set format first: a header line `> [ref](url)` followed by
+  // one or more `> N — text` body lines.
+  const headerMatch = VERSE_HEADER_RE.exec(firstNonEmpty);
+  if (headerMatch) {
+    const [, reference, url] = headerMatch;
+    const verses: VerseRef[] = [];
+    let cursor = firstNonEmptyIdx + 1;
+    for (; cursor < lines.length; cursor += 1) {
+      const trimmed = lines[cursor].trim();
+      if (trimmed === '') {
+        // Tolerate a single blank line inside the blockquote, but stop at
+        // any non-quote content — that's the start of the user's thought.
+        if (cursor + 1 < lines.length && lines[cursor + 1].trim().startsWith('>')) {
+          continue;
+        }
+        break;
+      }
+      const m = VERSE_BODY_RE.exec(trimmed);
+      if (!m) break;
+      verses.push({verse: parseInt(m[1], 10), text: m[2].trim()});
+    }
+    if (verses.length > 0) {
+      const thought = lines.slice(cursor).join('\n').trim();
+      verses.sort((a, b) => a.verse - b.verse);
+      return {
+        kind: 'verse',
+        sourceItemId,
+        headline: headline || reference.trim(),
+        reference: reference.trim(),
+        url: url.trim(),
+        verses,
+        thought,
+      };
+    }
+    // Header without bodies — treat as a single verse with unknown number.
+    const thought = lines.slice(firstNonEmptyIdx + 1).join('\n').trim();
     return {
       kind: 'verse',
       sourceItemId,
       headline: headline || reference.trim(),
       reference: reference.trim(),
       url: url.trim(),
-      verseText: text.trim(),
+      verses: [{verse: 1, text: ''}],
+      thought,
+    };
+  }
+
+  // Legacy single-line format: `> [ref](url) — text`.
+  const legacyMatch = LEGACY_VERSE_LINE_RE.exec(firstNonEmpty);
+  if (legacyMatch) {
+    const [, reference, url, text] = legacyMatch;
+    const thought = lines
+      .slice(firstNonEmptyIdx + 1)
+      .join('\n')
+      .trim();
+    // We don't know the verse number from a legacy line — fall back to 1.
+    // The store-level migration will look it up against the corpus when
+    // the import is applied.
+    return {
+      kind: 'verse',
+      sourceItemId,
+      headline: headline || reference.trim(),
+      reference: reference.trim(),
+      url: url.trim(),
+      verses: [{verse: extractFirstVerseNumber(reference) ?? 1, text: text.trim()}],
       thought,
     };
   }
@@ -205,6 +272,12 @@ function parseSection(
     headline: headline || firstLine(body) || 'Note',
     body,
   };
+}
+
+/** Pull the first verse number out of a reference like "1 Nephi 3:7-9". */
+function extractFirstVerseNumber(reference: string): number | undefined {
+  const m = /:(\d+)/.exec(reference);
+  return m ? parseInt(m[1], 10) : undefined;
 }
 
 function firstLine(s: string): string {
@@ -316,12 +389,17 @@ export function computeImportPreview(
 function itemsEqual(parsed: ParsedStackItem, existing: StackItem): boolean {
   if (parsed.headline.trim() !== existing.headline.trim()) return false;
   if (parsed.kind === 'verse' && existing.kind === 'verse') {
-    return (
-      parsed.reference.trim() === existing.reference.trim() &&
-      parsed.url.trim() === existing.url.trim() &&
-      parsed.verseText.trim() === existing.verseText.trim() &&
-      parsed.thought.trim() === existing.thought.trim()
-    );
+    if (parsed.reference.trim() !== existing.reference.trim()) return false;
+    if (parsed.url.trim() !== existing.url.trim()) return false;
+    if (parsed.thought.trim() !== existing.thought.trim()) return false;
+    if (parsed.verses.length !== existing.verses.length) return false;
+    for (let i = 0; i < parsed.verses.length; i += 1) {
+      const a = parsed.verses[i];
+      const b = existing.verses[i];
+      if (a.verse !== b.verse) return false;
+      if (a.text.trim() !== b.text.trim()) return false;
+    }
+    return true;
   }
   if (parsed.kind === 'note' && existing.kind === 'note') {
     return parsed.body.trim() === existing.body.trim();

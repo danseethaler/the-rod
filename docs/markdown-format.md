@@ -127,32 +127,134 @@ parser tolerates them.
 
 ### Verse items
 
-The first non-empty line in the section body is a markdown blockquote
-of the form:
+A verse item is a **verse set** — one or more verses, all from the
+same chapter, treated as a single unit. The reference covers the whole
+set:
+
+- single: `1 Nephi 3:7`
+- contiguous range: `1 Nephi 3:7-9`
+- non-contiguous: `1 Nephi 3:7, 9, 12-14`
+
+The blockquote spans multiple lines. The first line is a header carrying
+the reference + URL. Each verse follows on its own quoted line keyed by
+verse number:
+
+```markdown
+> [{reference}]({url})
+> {verseN} — {verse N text}
+> {verseM} — {verse M text}
+```
+
+Recognised by:
+
+```
+header line:  /^>\s*\[([^\]]+)\]\(([^)]+)\)\s*$/
+verse line:   /^>\s*(\d+)\s*[—\-.]\s*(.+)$/
+```
+
+The verse-line separator accepts em-dash `—`, hyphen `-`, or a period
+`.` (to tolerate editors that auto-substitute).
+
+#### URL format
+
+Verse URLs use the official Gospel Library deep-linking syntax with
+`id=` highlight params:
+
+- single verse: `…/3?lang=eng&id=p7#p7`
+- range: `…/3?lang=eng&id=p7-p9#p7`
+- non-contiguous: `…/3?lang=eng&id=p7,p9-p11#p7`
+
+Always include a fragment (`#p{first}`) so the linked page scrolls to
+the first verse in the set.
+
+#### Thought
+
+Anything after the blockquote — until the next `## ` heading — is the
+**thought**: the user's commentary on the set. Verses keep `thought` as
+a distinct field because the verse text is bounded scripture, not the
+user's reflection on it.
+
+Maps to:
+
+```ts
+{
+  kind: 'verse',
+  headline,
+  reference,           // formatted across the whole set
+  url,                 // id=p... highlight URL
+  verses: [{verse, text}, ...],  // sorted ascending by verse number
+  thought,
+}
+```
+
+#### Same-chapter invariant
+
+All verses in a single set must share `standardWorkSlug` + `bookSlug` +
+`chapter`. This is enforced inside Krumb (the multi-select UI is
+per-chapter; the search-list adds a single verse). Cross-chapter sets
+require a different deep-link strategy and are out of scope; if you
+need to express two chapters in one stack, emit two `## ` items.
+
+#### Inline formatting + trim inside verse text
+
+Each verse's text is **Bear-flavored markdown**, not plain text. Krumb
+has a constrained inline editor that lets users mark portions of a
+verse and trim out passages they don't want to quote. Plain scripture
+text is also valid markdown (no markers = no formatting), so existing
+or imported content flows through cleanly.
+
+Supported markers — these match Bear's keyboard shortcuts so the same
+text round-trips across both apps without translation:
+
+| Style       | Marker            | Bear ⌘ shortcut |
+|-------------|-------------------|-----------------|
+| Bold        | `**text**`        | ⌘B              |
+| Italic      | `_text_`          | ⌘I              |
+| Underline   | `~text~`          | ⌘U              |
+| Strikethrough | `~~text~~`      | ⌘⇧U             |
+| Highlight   | `==text==`        | ⌘⇧M             |
+
+Krumb exposes **bold, italic, underline, and highlight** in its own
+selection bar. Strikethrough is parsed leniently (markers stripped, no
+visible style applied) so a user who applies it in Bear doesn't get a
+broken parse — but the next round-trip silently drops it. Don't rely on
+strikethrough surviving a round-trip.
+
+Trim is encoded as a literal Unicode horizontal ellipsis `…` (U+2026)
+embedded in the verse text. There's no structural marker — the
+character is just part of the text. Examples:
+
+```markdown
+> 7 — And it came to pass that I, Nephi, said unto my father: I will go and do the things which the Lord hath commanded.
+> 7 — … I will go and do the things which the Lord hath commanded.
+> 7 — And it came to pass that I, Nephi, said unto my father: I will go and do …
+> 7 — And it came to pass … which the Lord hath commanded.
+```
+
+All four are valid storage shapes. The user-facing "Reset" action
+restores the canonical scripture text by looking the verse up against
+Krumb's bundled corpus (i.e. it discards any inline edits — formatting
+markers and trims).
+
+External producers generating Krumb-bound markdown:
+- Plain scripture text is fine — no markers required.
+- If you apply formatting, use the markers above.
+- If you trim, embed `…` (U+2026) in the text. Don't invent a custom
+  trim sentinel.
+
+#### Legacy single-line format
+
+For backward compatibility, the parser still accepts the pre-grouped
+shape:
 
 ```markdown
 > [{reference}]({url}) — {verse text}
 ```
 
-Recognised by the regex:
-
-```
-/^>\s*\[([^\]]+)\]\(([^)]+)\)\s*[—-]\s*(.+)$/
-```
-
-(Em-dash `—` is preferred but a hyphen `-` also matches, to be tolerant
-of editors that auto-substitute.)
-
-Anything after the blockquote line — until the next `## ` heading — is
-the **thought**: the user's commentary on the verse. Verses keep
-`thought` as a distinct field because the verse text is bounded
-scripture, not the user's reflection on it.
-
-Maps to:
-
-```ts
-{ kind: 'verse', headline, reference, url, verseText, thought }
-```
+This is treated as a single-verse set. The verse number is parsed out
+of the reference (`1 Nephi 3:7` → 7) when present, falling back to 1.
+**Do not emit this format from new producers** — emit the multi-line
+shape so the round-trip is lossless.
 
 ### Note items
 
@@ -180,15 +282,19 @@ Maps to:
 <!-- krumb:item:item_001 -->
 ## James 2:17
 
-> [James 2:17](https://www.churchofjesuschrist.org/study/scriptures/nt/james/2.17) — Even so faith, if it hath not works, is dead, being alone.
+> [James 2:17](https://www.churchofjesuschrist.org/study/scriptures/nt/james/2?lang=eng&id=p17#p17)
+> 17 — Even so faith, if it hath not works, is dead, being alone.
 
 The whole letter circles this. "Show me thy faith without thy works,
 and I will show thee my faith by my works."
 
 <!-- krumb:item:item_002 -->
-## Alma 32:21
+## Alma 32:21-23
 
-> [Alma 32:21](https://www.churchofjesuschrist.org/study/scriptures/bofm/alma/32.21) — And now as I said concerning faith—faith is not to have a perfect knowledge of things; therefore if ye have faith ye hope for things which are not seen, which are true.
+> [Alma 32:21-23](https://www.churchofjesuschrist.org/study/scriptures/bofm/alma/32?lang=eng&id=p21-p23#p21)
+> 21 — And now as I said concerning faith—faith is not to have a perfect knowledge of things; therefore if ye have faith ye hope for things which are not seen, which are true.
+> 22 — And now, behold, I say unto you, and I would that ye should remember, that God is merciful unto all who believe on his name; therefore he desireth, in the first place, that ye should believe, yea, even on his word.
+> 23 — And now, he imparteth his word by angels unto men, yea, not only men but women also. Now this is not all; little children do have words given unto them many times, which confound the wise and the learned.
 
 <!-- krumb:item:item_003 -->
 ## Build a bridge here
@@ -200,10 +306,11 @@ makes works the only honest test of whether the faith is real.
 Maybe end on Heb 11:1 if there's time.
 ```
 
-Item 1 (verse) has both verse text and a thought. Item 2 (verse) has no
-thought, so the section is just the blockquote. Item 3 (note) is purely
-body — the headline "Build a bridge here" is editable; the parser uses
-whatever's in the `## ` heading.
+Item 1 (verse set, one verse) has a thought. Item 2 (verse set, three
+contiguous verses) has no thought, so the section is just the
+blockquote. Item 3 (note) is purely body — the headline "Build a
+bridge here" is editable; the parser uses whatever's in the `## `
+heading.
 
 ---
 
@@ -219,7 +326,8 @@ item 2 entirely, and adds a brand-new note at the end. Re-importing:
 <!-- krumb:item:item_001 -->
 ## James 2:17
 
-> [James 2:17](...) — Even so faith, if it hath not works, is dead, being alone.
+> [James 2:17](...)
+> 17 — Even so faith, if it hath not works, is dead, being alone.
 
 The whole letter circles this. Faith without works isn't faith at all
 — it's wishful thinking dressed up.
@@ -238,7 +346,7 @@ faith?
 Import preview will show:
 
 - **Changed:** "James 2:17" (thought rewritten)
-- **Removed:** "Alma 32:21" (no longer in the markdown)
+- **Removed:** "Alma 32:21-23" (no longer in the markdown)
 - **Unchanged:** "Build a bridge here"
 - **Added:** "Closing thought" (no `krumb:item` marker → treated as new)
 
@@ -256,12 +364,20 @@ interface StackItemBase {
   createdAt: number;
 }
 
+interface VerseRef {
+  verse: number;        // 1-indexed verse number within the chapter
+  text: string;         // the scripture text for this single verse
+}
+
 interface StackItemVerse extends StackItemBase {
   kind: 'verse';
-  reference: string;
-  url: string;
-  verseText: string;    // the scripture itself
-  thought: string;      // user's commentary
+  reference: string;    // formatted across whole set: "1 Nephi 3:7-9"
+  url: string;          // Gospel Library deep link with id= highlights
+  standardWorkSlug: string;
+  bookSlug?: string;    // omitted for D&C / PoGP sections
+  chapter: number;      // shared by every verse in the set
+  verses: VerseRef[];   // sorted ascending by `verse`, always non-empty
+  thought: string;      // user's commentary on the set
 }
 
 interface StackItemNote extends StackItemBase {
@@ -269,6 +385,13 @@ interface StackItemNote extends StackItemBase {
   body: string;         // the note IS the thought
 }
 ```
+
+The chapter-context fields (`standardWorkSlug`, `bookSlug`, `chapter`)
+live on the item but **are not serialized into markdown**. They're
+recovered on import by looking the first verse up against Krumb's
+bundled corpus by `{chapter title}:{first verse number}`. Producers
+generating Krumb-bound markdown from outside the app don't need to
+emit them.
 
 ---
 
@@ -305,7 +428,8 @@ workflow that condenses a longer note into a stack):
 - **Always emit `# Title` as the very first heading.**
 - **Verse blockquotes need the URL.** It's the link out to Gospel
   Library. Without it, the section is parsed as a note, not a verse.
-  Format: `> [Reference](url) — exact verse text`.
+  Use the multi-line shape (`> [Reference](url)` header + one `> N —
+  text` line per verse). Use the official `id=p..#p..` highlight URL.
 - **The `## ` heading text is the headline.** If you set a meaningful
   one, the user will see it in the import preview and on the item
   card.

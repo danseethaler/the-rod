@@ -11,7 +11,7 @@ import {HighlightedText} from '@/components/HighlightedText';
 import {RodKeyboardAvoidingView} from '@/components/RodKeyboardAvoidingView';
 import {ScreenHeader} from '@/components/ScreenHeader';
 import {hapticLight, hapticSuccess} from '@/lib/haptics';
-import {buildVerseUrl, searchVerses} from '@/lib/scripture';
+import {searchVerses} from '@/lib/scripture';
 import {toast} from '@/lib/toast';
 import type {Verse} from '@/lib/types';
 import {
@@ -32,7 +32,7 @@ export default function AddVerseScreen() {
     () => resolveStackItems(stack, allItems),
     [stack, allItems]
   );
-  const addVerseToStack = useStacksStore((s) => s.addVerseToStack);
+  const addVerseSetToStack = useStacksStore((s) => s.addVerseSetToStack);
 
   const [query, setQuery] = useState('');
   const inputRef = useRef<TextInput>(null);
@@ -43,26 +43,31 @@ export default function AddVerseScreen() {
     return () => clearTimeout(t);
   }, []);
 
-  const alreadyAddedRefs = useMemo(
-    () =>
-      new Set(
-        items
-          .filter(
-            (i): i is Extract<typeof i, {kind: 'verse'}> => i.kind === 'verse'
-          )
-          .map((i) => i.reference)
-      ),
-    [items]
-  );
+  /**
+   * Index every individual verse already represented by any verse-set in
+   * this stack. Keyed by `<work>|<book>|<chapter>:<verse>` so a single
+   * verse won't be silently re-added when it's part of a larger set.
+   */
+  const alreadyAddedKeys = useMemo(() => {
+    const out = new Set<string>();
+    for (const i of items) {
+      if (i.kind !== 'verse') continue;
+      for (const v of i.verses) {
+        out.add(
+          `${i.standardWorkSlug}|${i.bookSlug ?? ''}|${i.chapter}:${v.verse}`
+        );
+      }
+    }
+    return out;
+  }, [items]);
+
+  const verseKey = (v: Verse) =>
+    `${v.standardWorkSlug}|${v.bookSlug ?? ''}|${v.chapter}:${v.verse}`;
 
   const onAdd = (verse: Verse) => {
     if (!stack) return;
     hapticSuccess();
-    addVerseToStack(stack.id, {
-      reference: verse.reference,
-      text: verse.text,
-      url: buildVerseUrl(verse),
-    });
+    addVerseSetToStack(stack.id, [verse]);
     toast({title: `Added ${verse.reference}`, preset: 'done'});
   };
 
@@ -129,7 +134,7 @@ export default function AddVerseScreen() {
             keyboardDismissMode="on-drag"
             contentContainerStyle={{paddingBottom: 24}}
             renderItem={({item}) => {
-              const added = alreadyAddedRefs.has(item.reference);
+              const added = alreadyAddedKeys.has(verseKey(item));
               return (
                 <View className="mx-4 mb-3 bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 overflow-hidden">
                   <View className="px-4 pt-4">

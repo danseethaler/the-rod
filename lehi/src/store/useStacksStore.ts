@@ -6,6 +6,14 @@ import {
   markdownToStack,
   type ImportPreview,
 } from '@/lib/markdown';
+import {
+  allVerses,
+  buildVerseSetReference,
+  buildVerseSetUrl,
+  chapterTitleFromReference,
+  getCanonicalVerseText,
+  verseRefsFrom,
+} from '@/lib/scripture';
 import {loadJson, saveJson, STORAGE_KEYS} from '@/lib/storage';
 import type {
   Stack,
@@ -15,6 +23,35 @@ import type {
   StackStatus,
   Verse,
 } from '@/lib/types';
+
+let CORPUS_INDEX: Map<string, Verse> | null = null;
+function corpusIndex(): Map<string, Verse> {
+  if (CORPUS_INDEX) return CORPUS_INDEX;
+  CORPUS_INDEX = new Map();
+  for (const v of allVerses()) CORPUS_INDEX.set(v.reference, v);
+  return CORPUS_INDEX;
+}
+
+/**
+ * Given a multi-verse reference ("1 Nephi 3:7-9") and a known verse
+ * number, find the matching corpus entry so we can recover chapter / book
+ * / work metadata.
+ */
+function matchByReferenceAndVerse(
+  reference: string,
+  verseNumber: number | undefined
+): Verse | undefined {
+  if (verseNumber == null) return undefined;
+  const chapterTitle = chapterTitleFromReference(reference);
+  return corpusIndex().get(`${chapterTitle}:${verseNumber}`);
+}
+
+/** Pull the chapter number out of a reference's chapter prefix — `"1 Nephi 3:7-9"` → 3. */
+function extractChapterFromReference(reference: string): number {
+  const chapterTitle = chapterTitleFromReference(reference);
+  const m = /(\d+)\s*$/.exec(chapterTitle);
+  return m ? parseInt(m[1], 10) : 1;
+}
 
 interface StacksState {
   hydrated: boolean;
@@ -39,14 +76,31 @@ interface StacksState {
   reorderItems: (stackId: string, newOrder: string[]) => void;
 
   // Items
-  addVerseToStack: (
-    stackId: string,
-    verse: Pick<Verse, 'reference' | 'text'> & {url: string}
-  ) => StackItemVerse;
+  /**
+   * Add one or more verses to a stack as a single grouped item. All verses
+   * must share standardWorkSlug + bookSlug + chapter; the caller enforces
+   * this (the verse-context view is per-chapter, and the search list adds
+   * a single verse at a time).
+   */
+  addVerseSetToStack: (stackId: string, verses: Verse[]) => StackItemVerse;
   addNoteToStack: (stackId: string, body: string) => StackItemNote;
   updateNoteBody: (itemId: string, body: string) => void;
   updateVerseThought: (itemId: string, thought: string) => void;
   updateHeadline: (itemId: string, headline: string) => void;
+  /**
+   * Replace the markdown text for a single verse inside a verse-set
+   * item. Caller is responsible for the markdown shape (the inline
+   * formatting & trim helpers in `lib/verseFormat.ts` produce the right
+   * thing).
+   */
+  updateVerseText: (itemId: string, verseNumber: number, text: string) => void;
+  /**
+   * Restore one verse inside a verse-set to its canonical scripture
+   * text from the bundled corpus. No-op if the item or verse can't be
+   * found, or if no canonical text resolves (e.g. legacy migrated item
+   * with `standardWorkSlug === 'unknown'`).
+   */
+  resetVerseText: (itemId: string, verseNumber: number) => void;
   removeItem: (itemId: string) => void;
 
   // Pending-verse handoff
@@ -78,11 +132,18 @@ export const useStacksStore = create<StacksState>((set, get) => ({
   pendingImport: null,
 
   hydrate: async () => {
-    const [stacks, items] = await Promise.all([
+    const [stacks, rawItems] = await Promise.all([
       loadJson<Stack[]>(STORAGE_KEYS.stacks, []),
       loadJson<StackItem[]>(STORAGE_KEYS.stackItems, []),
     ]);
+    const {items, migrated} = migrateItems(rawItems);
     set({stacks, items, hydrated: true});
+    // If we rewrote any verse items into the new grouped shape, persist
+    // the migrated payload so we don't pay the migration cost on every
+    // launch (and so a future export uses the canonical fields).
+    if (migrated) {
+      persist({stacks, items});
+    }
   },
 
   createStack: title => {
@@ -134,18 +195,8 @@ export const useStacksStore = create<StacksState>((set, get) => ({
     persist({stacks, items: get().items});
   },
 
-  addVerseToStack: (stackId, verse) => {
-    const item: StackItemVerse = {
-      id: newId(),
-      stackId,
-      kind: 'verse',
-      headline: verse.reference,
-      reference: verse.reference,
-      verseText: verse.text,
-      url: verse.url,
-      thought: '',
-      createdAt: Date.now(),
-    };
+  addVerseSetToStack: (stackId, verses) => {
+    const item = buildVerseSetItem(stackId, verses);
     const items = [...get().items, item];
     const stacks = get().stacks.map(s =>
       s.id === stackId
@@ -203,6 +254,43 @@ export const useStacksStore = create<StacksState>((set, get) => ({
     const items = get().items.map(i =>
       i.id === itemId ? {...i, headline} : i
     );
+    set({items});
+    persist({stacks: get().stacks, items});
+  },
+
+  updateVerseText: (itemId, verseNumber, text) => {
+    const items = get().items.map(i => {
+      if (i.id !== itemId || i.kind !== 'verse') return i;
+      return {
+        ...i,
+        verses: i.verses.map(v =>
+          v.verse === verseNumber ? {...v, text} : v
+        ),
+      };
+    });
+    set({items});
+    persist({stacks: get().stacks, items});
+  },
+
+  resetVerseText: (itemId, verseNumber) => {
+    const item = get().items.find(i => i.id === itemId);
+    if (!item || item.kind !== 'verse') return;
+    const canonical = getCanonicalVerseText(
+      item.standardWorkSlug,
+      item.bookSlug,
+      item.chapter,
+      verseNumber
+    );
+    if (canonical == null) return;
+    const items = get().items.map(i => {
+      if (i.id !== itemId || i.kind !== 'verse') return i;
+      return {
+        ...i,
+        verses: i.verses.map(v =>
+          v.verse === verseNumber ? {...v, text: canonical} : v
+        ),
+      };
+    });
     set({items});
     persist({stacks: get().stacks, items});
   },
@@ -268,14 +356,23 @@ function applyImport(
     const createdAt = matched?.createdAt ?? now;
 
     if (p.kind === 'verse') {
+      // Imported markdown gives us reference + per-verse text but not the
+      // chapter / book / work metadata. Look up the first verse against
+      // the bundled corpus to recover that context. If the lookup fails
+      // (hand-edited reference, unrecognized standard work), we still
+      // store the item — it just won't have a working `Open` deep link.
+      const found = matchByReferenceAndVerse(p.reference, p.verses[0]?.verse);
       const item: StackItemVerse = {
         id,
         stackId: preview.targetStackId,
         kind: 'verse',
         headline: p.headline,
         reference: p.reference,
-        verseText: p.verseText,
         url: p.url,
+        standardWorkSlug: found?.standardWorkSlug ?? 'unknown',
+        bookSlug: found?.bookSlug,
+        chapter: found?.chapter ?? extractChapterFromReference(p.reference),
+        verses: [...p.verses].sort((a, b) => a.verse - b.verse),
         thought: p.thought,
         createdAt,
       };
@@ -333,6 +430,135 @@ function applyImport(
     stackId: preview.targetStackId,
     action,
     itemCount: newItems.length,
+  };
+}
+
+function buildVerseSetItem(stackId: string, verses: Verse[]): StackItemVerse {
+  if (verses.length === 0) {
+    throw new Error('addVerseSetToStack: empty verses array');
+  }
+  const sorted = [...verses].sort((a, b) => a.verse - b.verse);
+  const first = sorted[0];
+  // Same-chapter invariant. Caller (picker / verse-context view) guarantees
+  // it; we trust it here and don't filter, so a violation throws loudly.
+  for (const v of sorted) {
+    if (
+      v.standardWorkSlug !== first.standardWorkSlug ||
+      (v.bookSlug ?? '') !== (first.bookSlug ?? '') ||
+      v.chapter !== first.chapter
+    ) {
+      throw new Error(
+        'addVerseSetToStack: all verses must share book + chapter'
+      );
+    }
+  }
+  const chapterTitle = chapterTitleFromReference(first.reference);
+  const reference = buildVerseSetReference(
+    chapterTitle,
+    sorted.map(v => v.verse)
+  );
+  return {
+    id: newId(),
+    stackId,
+    kind: 'verse',
+    headline: reference,
+    reference,
+    url: buildVerseSetUrl(sorted),
+    standardWorkSlug: first.standardWorkSlug,
+    bookSlug: first.bookSlug,
+    chapter: first.chapter,
+    verses: verseRefsFrom(sorted),
+    thought: '',
+    createdAt: Date.now(),
+  };
+}
+
+/**
+ * One-shot migration from the pre-grouped verse shape (single `verseText`
+ * field, no `verses` array) to the v2 verse-set shape. Looks up the
+ * reference against the bundled corpus to fill in chapter / book / work
+ * metadata. Items already in the new shape pass through untouched.
+ */
+function migrateItems(rawItems: StackItem[]): {
+  items: StackItem[];
+  migrated: boolean;
+} {
+  let migrated = false;
+  let bundleIndex: Map<string, Verse> | null = null;
+
+  const items = rawItems.map(item => {
+    if (item.kind !== 'verse') return item;
+    if (Array.isArray((item as StackItemVerse).verses)) return item;
+
+    migrated = true;
+    if (!bundleIndex) {
+      bundleIndex = new Map();
+      for (const v of allVerses()) bundleIndex.set(v.reference, v);
+    }
+    return migrateLegacyVerseItem(item as unknown as LegacyVerseItem, bundleIndex);
+  });
+
+  return {items, migrated};
+}
+
+interface LegacyVerseItem {
+  id: string;
+  stackId: string;
+  kind: 'verse';
+  headline?: string;
+  reference: string;
+  url?: string;
+  /** Old shape: single verse text. May also be `text` on very old data. */
+  verseText?: string;
+  text?: string;
+  thought?: string;
+  createdAt: number;
+}
+
+function migrateLegacyVerseItem(
+  legacy: LegacyVerseItem,
+  bundleIndex: Map<string, Verse>
+): StackItemVerse {
+  const reference = legacy.reference;
+  const verseText = legacy.verseText ?? legacy.text ?? '';
+  const found = bundleIndex.get(reference);
+
+  if (found) {
+    return {
+      id: legacy.id,
+      stackId: legacy.stackId,
+      kind: 'verse',
+      headline: legacy.headline?.trim() || reference,
+      reference,
+      url: buildVerseSetUrl([found]),
+      standardWorkSlug: found.standardWorkSlug,
+      bookSlug: found.bookSlug,
+      chapter: found.chapter,
+      verses: [{verse: found.verse, text: verseText || found.text}],
+      thought: legacy.thought ?? '',
+      createdAt: legacy.createdAt,
+    };
+  }
+
+  // Fall back to parsing chapter:verse out of the reference string. Any
+  // item that lands here will still display, but Open will use the legacy
+  // URL (if any) and the verse number is best-effort.
+  const m = /(\d+):(\d+)\s*$/.exec(reference);
+  const chapter = m ? parseInt(m[1], 10) : 1;
+  const verseNum = m ? parseInt(m[2], 10) : 1;
+  return {
+    id: legacy.id,
+    stackId: legacy.stackId,
+    kind: 'verse',
+    headline: legacy.headline?.trim() || reference,
+    reference,
+    url: legacy.url ?? '',
+    standardWorkSlug: 'unknown',
+    bookSlug: undefined,
+    chapter,
+    verses: [{verse: verseNum, text: verseText}],
+    thought: legacy.thought ?? '',
+    createdAt: legacy.createdAt,
   };
 }
 

@@ -57,6 +57,20 @@ lehi/
 - `stack/[id]/add.tsx` — form sheet, search-and-add verses (Filter step)
 - `stack/[id]/export.tsx` — fitToContents form sheet, send to Bear or copy markdown
 
+## Markdown round-trip format
+
+Krumb exports stacks to clipboard / Bear and re-imports them as
+markdown. The canonical spec lives at
+`/Users/danseethaler/Developer/the-rod/docs/markdown-format.md` and is
+the single source of truth — it's read by agents in this repo *and* by
+agents in the Bear repo (sibling directory) when they generate
+Krumb-importable notes.
+
+**If you change `lehi/src/lib/markdown.ts` (serializer / parser /
+diff) or the `StackItemVerse` / `StackItemNote` shape, update
+`docs/markdown-format.md` in the same commit.** Drift between the
+implementation and the spec silently breaks the Bear interop.
+
 ## Brand color
 
 `brand` in tailwind is **amber** (`#f59e0b` at 500). Picks up the existing
