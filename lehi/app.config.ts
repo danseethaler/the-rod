@@ -7,6 +7,8 @@ export default ({config}: ConfigContext): ExpoConfig => ({
   name: IS_DEV ? 'Krumb (Dev)' : 'Krumb',
   slug: 'krumb',
   scheme: 'krumb',
+  version: '1.0.0',
+  owner: 'weekly-llc',
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
   icon: './assets/icon.png',
@@ -41,6 +43,9 @@ export default ({config}: ConfigContext): ExpoConfig => ({
   },
   extra: {
     router: {},
+    eas: {
+      projectId: '9dfaefd2-86f5-4013-85e3-d9decfc7ec41',
+    },
     simulator: {
       name: 'Krumb',
       deviceType: 'iPhone-17-Pro',
