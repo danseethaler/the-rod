@@ -1,7 +1,7 @@
 import {useScrollToTop} from '@react-navigation/native';
 import {Search, X} from 'lucide-react-native';
 import {useColorScheme} from 'nativewind';
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, {useMemo, useRef, useState} from 'react';
 import {
   FlatList,
   Keyboard,
@@ -42,12 +42,6 @@ export default function SearchScreen() {
   const result = useMemo(() => searchVerses(query), [query]);
   const trimmedLength = query.trim().length;
   const isTooShort = trimmedLength > 0 && trimmedLength < 3;
-
-  useEffect(() => {
-    // Soft autofocus on first paint.
-    const t = setTimeout(() => inputRef.current?.focus(), 250);
-    return () => clearTimeout(t);
-  }, []);
 
   const onClear = () => {
     hapticLight();

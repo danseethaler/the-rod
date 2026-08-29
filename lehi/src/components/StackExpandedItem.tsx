@@ -1,5 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import {
+  ArrowRightLeft,
   ChevronUp,
   Copy,
   ExternalLink,
@@ -36,6 +37,8 @@ interface Props {
   onChangeHeadline: (headline: string) => void;
   onChangeNoteBody: (body: string) => void;
   onChangeThought: (thought: string) => void;
+  /** Optional — only rendered when there's another section to move to. */
+  onMove?: () => void;
   onRemove: () => void;
   onCollapse: () => void;
 }
@@ -59,6 +62,7 @@ export const StackExpandedItem = React.memo(function StackExpandedItem({
   onChangeHeadline,
   onChangeNoteBody,
   onChangeThought,
+  onMove,
   onRemove,
   onCollapse,
 }: Props) {
@@ -139,6 +143,20 @@ export const StackExpandedItem = React.memo(function StackExpandedItem({
           tone="brand"
           isDark={isDark}
         />
+        {onMove ? (
+          <ActionButton
+            label="Move"
+            icon={
+              <ArrowRightLeft
+                size={14}
+                color={isDark ? '#fbbf24' : '#b45309'}
+              />
+            }
+            onPress={onMove}
+            tone="brand"
+            isDark={isDark}
+          />
+        ) : null}
         <ActionButton
           label="Remove"
           icon={<Trash2 size={14} color={isDark ? '#fca5a5' : '#dc2626'} />}

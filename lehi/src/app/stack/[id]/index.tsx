@@ -1,6 +1,8 @@
 import * as Clipboard from 'expo-clipboard';
 import {useLocalSearchParams, useRouter} from 'expo-router';
 import {
+  ArrowDown,
+  ArrowUp,
   Bold,
   CheckCircle2,
   ChevronDown,
@@ -19,7 +21,14 @@ import {
 } from 'lucide-react-native';
 import {useColorScheme} from 'nativewind';
 import React, {useCallback, useMemo, useRef, useState} from 'react';
-import {Alert, ScrollView, Text, TextInput, View} from 'react-native';
+import {
+  Alert,
+  type AlertButton,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import Sortable from 'react-native-sortables';
 
@@ -75,6 +84,7 @@ export default function StackDetailScreen() {
   const deleteStack = useStacksStore(s => s.deleteStack);
   const reorderSections = useStacksStore(s => s.reorderSections);
   const reorderItemsInSection = useStacksStore(s => s.reorderItemsInSection);
+  const moveItem = useStacksStore(s => s.moveItem);
   const removeItem = useStacksStore(s => s.removeItem);
   const updateNoteBody = useStacksStore(s => s.updateNoteBody);
   const updateVerseThought = useStacksStore(s => s.updateVerseThought);
@@ -299,7 +309,15 @@ export default function StackDetailScreen() {
   };
 
   const isFormatBarVisible = activeSelection != null;
-  const isSectionDragEnabled = expandedItemId == null;
+
+  const onMoveSection = (idx: number, dir: -1 | 1) => {
+    const next = [...stack.sectionIds];
+    const target = idx + dir;
+    if (target < 0 || target >= next.length) return;
+    [next[idx], next[target]] = [next[target], next[idx]];
+    hapticLight();
+    reorderSections(stack.id, next);
+  };
 
   return (
     <SafeAreaView
@@ -355,54 +373,40 @@ export default function StackDetailScreen() {
             </AnimatedPressable>
           </View>
 
-          <View className="px-4">
-            <Sortable.Grid
-              columns={1}
-              data={sections}
-              keyExtractor={s => s.id}
-              rowGap={12}
-              sortEnabled={isSectionDragEnabled}
-              dragActivationDelay={350}
-              hapticsEnabled
-              enableActiveItemSnap={false}
-              activeItemScale={1.02}
-              activeItemShadowOpacity={0}
-              onDragStart={() => {
-                dragRecentlyActiveRef.current = true;
-              }}
-              onDragEnd={({data}) => {
-                reorderSections(
-                  stack.id,
-                  data.map(s => s.id)
-                );
-                setTimeout(() => {
-                  dragRecentlyActiveRef.current = false;
-                }, 250);
-              }}
-              renderItem={({item: section}) => (
-                <SectionCard
-                  section={section}
-                  items={resolveSectionItems(section, allItems)}
-                  isCollapsed={collapsedSectionIds.has(section.id)}
-                  isOnlySection={sections.length === 1}
-                  expandedItemId={expandedItemId}
-                  activeSelection={activeSelection}
-                  onToggleCollapse={() => onToggleCollapseSection(section.id)}
-                  onRenameSection={t => renameSection(section.id, t)}
-                  onChangeBody={b => setSectionBody(section.id, b)}
-                  onDeleteSection={() => onDeleteSection(section)}
-                  onReorderItems={ids => reorderItemsInSection(section.id, ids)}
-                  onToggleExpandItem={onToggleExpand}
-                  onItemSelectionChange={onItemSelectionChange}
-                  onItemResetVerse={onItemResetVerse}
-                  onChangeHeadline={(itemId, h) => updateHeadline(itemId, h)}
-                  onChangeNoteBody={(itemId, b) => updateNoteBody(itemId, b)}
-                  onChangeThought={(itemId, t) => updateVerseThought(itemId, t)}
-                  onRemoveItem={onRemoveItem}
-                  isDark={isDark}
-                />
-              )}
-            />
+          <View className="px-4 gap-3">
+            {sections.map((section, idx) => (
+              <SectionCard
+                key={section.id}
+                section={section}
+                items={resolveSectionItems(section, allItems)}
+                isCollapsed={collapsedSectionIds.has(section.id)}
+                isOnlySection={sections.length === 1}
+                isFirst={idx === 0}
+                isLast={idx === sections.length - 1}
+                expandedItemId={expandedItemId}
+                activeSelection={activeSelection}
+                otherSections={sections
+                  .filter(s => s.id !== section.id)
+                  .map(s => ({id: s.id, title: s.title}))}
+                onToggleCollapse={() => onToggleCollapseSection(section.id)}
+                onRenameSection={t => renameSection(section.id, t)}
+                onChangeBody={b => setSectionBody(section.id, b)}
+                onDeleteSection={() => onDeleteSection(section)}
+                onMoveSection={dir => onMoveSection(idx, dir)}
+                onReorderItems={ids => reorderItemsInSection(section.id, ids)}
+                onMoveItemToSection={(itemId, toSectionId) =>
+                  moveItem(itemId, section.id, toSectionId)
+                }
+                onToggleExpandItem={onToggleExpand}
+                onItemSelectionChange={onItemSelectionChange}
+                onItemResetVerse={onItemResetVerse}
+                onChangeHeadline={(itemId, h) => updateHeadline(itemId, h)}
+                onChangeNoteBody={(itemId, b) => updateNoteBody(itemId, b)}
+                onChangeThought={(itemId, t) => updateVerseThought(itemId, t)}
+                onRemoveItem={onRemoveItem}
+                isDark={isDark}
+              />
+            ))}
           </View>
 
           <View className="px-4 mt-3">
@@ -487,13 +491,18 @@ interface SectionCardProps {
   items: StackItem[];
   isCollapsed: boolean;
   isOnlySection: boolean;
+  isFirst: boolean;
+  isLast: boolean;
   expandedItemId: string | null;
   activeSelection: ActiveSelection | null;
+  otherSections: ReadonlyArray<{id: string; title: string}>;
   onToggleCollapse: () => void;
   onRenameSection: (title: string) => void;
   onChangeBody: (body: string) => void;
   onDeleteSection: () => void;
+  onMoveSection: (dir: -1 | 1) => void;
   onReorderItems: (newOrder: string[]) => void;
+  onMoveItemToSection: (itemId: string, toSectionId: string) => void;
   onToggleExpandItem: (itemId: string) => void;
   onItemSelectionChange: (
     itemId: string,
@@ -513,13 +522,18 @@ function SectionCard({
   items,
   isCollapsed,
   isOnlySection,
+  isFirst,
+  isLast,
   expandedItemId,
   activeSelection,
+  otherSections,
   onToggleCollapse,
   onRenameSection,
   onChangeBody,
   onDeleteSection,
+  onMoveSection,
   onReorderItems,
+  onMoveItemToSection,
   onToggleExpandItem,
   onItemSelectionChange,
   onItemResetVerse,
@@ -530,6 +544,24 @@ function SectionCard({
   isDark,
 }: SectionCardProps) {
   const itemDragEnabled = expandedItemId == null;
+
+  const onMoveItem = (item: StackItem) => {
+    if (otherSections.length === 0) return;
+    const buttons: AlertButton[] = otherSections.map(s => ({
+      text: s.title.trim() || 'Untitled section',
+      onPress: () => {
+        onMoveItemToSection(item.id, s.id);
+        hapticSuccess();
+        toast({title: 'Item moved', preset: 'done'});
+      },
+    }));
+    buttons.push({text: 'Cancel', style: 'cancel'});
+    Alert.alert(
+      'Move to section',
+      `Move "${item.headline.trim() || 'this item'}" to:`,
+      buttons
+    );
+  };
 
   return (
     <View className="bg-white dark:bg-neutral-800 rounded-2xl border border-neutral-100 dark:border-neutral-700 overflow-hidden">
@@ -555,17 +587,37 @@ function SectionCard({
           placeholderTextColor={isDark ? '#737373' : '#a3a3a3'}
           className="flex-1 text-base font-semibold text-neutral-900 dark:text-white px-1"
         />
-        <Text className="text-xs text-neutral-400 dark:text-neutral-500 mr-2">
+        <Text className="text-xs text-neutral-400 dark:text-neutral-500 mr-1">
           {items.length}
         </Text>
         {!isOnlySection && (
-          <AnimatedPressable
-            onPress={onDeleteSection}
-            className="w-9 h-9 items-center justify-center"
-            accessibilityLabel="Delete section"
-          >
-            <Trash2 size={14} color={isDark ? '#fca5a5' : '#dc2626'} />
-          </AnimatedPressable>
+          <>
+            <AnimatedPressable
+              onPress={() => onMoveSection(-1)}
+              disabled={isFirst}
+              className="w-8 h-8 items-center justify-center"
+              style={{opacity: isFirst ? 0.3 : 1}}
+              accessibilityLabel="Move section up"
+            >
+              <ArrowUp size={16} color={isDark ? '#fff' : '#171717'} />
+            </AnimatedPressable>
+            <AnimatedPressable
+              onPress={() => onMoveSection(1)}
+              disabled={isLast}
+              className="w-8 h-8 items-center justify-center"
+              style={{opacity: isLast ? 0.3 : 1}}
+              accessibilityLabel="Move section down"
+            >
+              <ArrowDown size={16} color={isDark ? '#fff' : '#171717'} />
+            </AnimatedPressable>
+            <AnimatedPressable
+              onPress={onDeleteSection}
+              className="w-9 h-9 items-center justify-center"
+              accessibilityLabel="Delete section"
+            >
+              <Trash2 size={14} color={isDark ? '#fca5a5' : '#dc2626'} />
+            </AnimatedPressable>
+          </>
         )}
       </View>
 
@@ -630,6 +682,11 @@ function SectionCard({
                       onChangeHeadline={h => onChangeHeadline(item.id, h)}
                       onChangeNoteBody={b => onChangeNoteBody(item.id, b)}
                       onChangeThought={t => onChangeThought(item.id, t)}
+                      onMove={
+                        otherSections.length > 0
+                          ? () => onMoveItem(item)
+                          : undefined
+                      }
                       onRemove={() => onRemoveItem(item)}
                       onCollapse={() => onToggleExpandItem(item.id)}
                     />
