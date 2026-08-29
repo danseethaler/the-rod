@@ -7,6 +7,7 @@ import {Linking, Text, View} from 'react-native';
 
 import {AnimatedPressable} from '@/components/AnimatedPressable';
 import {HighlightedText} from '@/components/HighlightedText';
+import {formatAnnotation, getAnnotation} from '@/lib/annotations';
 import {hapticLight, hapticSuccess} from '@/lib/haptics';
 import {
   buildMarkdownBlockquote,
@@ -26,6 +27,7 @@ export const VerseCard: React.FC<Props> = ({verse, query = ''}) => {
   const {colorScheme} = useColorScheme();
   const isDark = colorScheme === 'dark';
   const setPendingVerses = useStacksStore((s) => s.setPendingVerses);
+  const annotation = getAnnotation(verse);
 
   const onDrillIn = () => {
     hapticLight();
@@ -64,9 +66,19 @@ export const VerseCard: React.FC<Props> = ({verse, query = ''}) => {
         accessibilityLabel={`Open ${verse.reference} in context`}
       >
         <View className="px-4 pt-4">
-          <Text className="text-sm font-semibold text-brand-600 dark:text-brand-400 mb-1.5">
+          <Text className="text-sm font-semibold text-brand-600 dark:text-brand-400">
             {verse.reference}
           </Text>
+          {annotation ? (
+            <Text
+              className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 mb-1.5"
+              numberOfLines={2}
+            >
+              {formatAnnotation(annotation)}
+            </Text>
+          ) : (
+            <View className="mb-1.5" />
+          )}
           <HighlightedText
             text={verse.text}
             query={query}

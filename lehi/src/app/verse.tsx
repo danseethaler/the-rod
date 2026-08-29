@@ -6,6 +6,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 
 import {AnimatedPressable} from '@/components/AnimatedPressable';
 import {ScreenHeader} from '@/components/ScreenHeader';
+import {formatAnnotation, getAnnotation} from '@/lib/annotations';
 import {hapticLight, hapticSelection} from '@/lib/haptics';
 import {chapterTitleFromReference, getChapterVerses} from '@/lib/scripture';
 import type {Verse} from '@/lib/types';
@@ -38,6 +39,16 @@ export default function VerseContextScreen() {
     const first = verses[0];
     return first ? chapterTitleFromReference(first.reference) : '';
   }, [verses]);
+
+  const annotation = useMemo(
+    () =>
+      getAnnotation({
+        standardWorkSlug: params.work ?? '',
+        bookSlug: params.book?.length ? params.book : undefined,
+        chapter: chapterNum,
+      }),
+    [params.work, params.book, chapterNum]
+  );
 
   const [selected, setSelected] = useState<Set<string>>(() => {
     const target = verses.find((v) => v.verse === targetVerseNum);
@@ -100,6 +111,14 @@ export default function VerseContextScreen() {
       className="flex-1 bg-neutral-50 dark:bg-neutral-900"
     >
       <ScreenHeader title={chapterTitle} leading="back" />
+
+      {annotation ? (
+        <View className="px-4 pb-2">
+          <Text className="text-sm leading-5 text-neutral-500 dark:text-neutral-400">
+            {formatAnnotation(annotation)}
+          </Text>
+        </View>
+      ) : null}
 
       <FlatList
         ref={listRef}

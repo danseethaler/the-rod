@@ -1,11 +1,16 @@
 // Domain types for The Rod. Single source of truth.
 
+/**
+ * The `lds_slug` each standard work carries in the bundled corpus — the
+ * same short slugs the Gospel Library URLs use. `Verse.standardWorkSlug`
+ * holds one of these, NOT the long folder-style names.
+ */
 export type StandardWorkSlug =
-  | 'old-testament'
-  | 'new-testament'
-  | 'book-of-mormon'
-  | 'doctrine-and-covenants'
-  | 'pearl-of-great-price';
+  | 'ot'
+  | 'nt'
+  | 'bofm'
+  | 'dc-testament/dc'
+  | 'pgp';
 
 export interface Verse {
   reference: string;

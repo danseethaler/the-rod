@@ -1,0 +1,53 @@
+import type {BookAnnotations} from './annotations.types';
+
+/**
+ * The D&C has no books — `chapter` on a flat verse is the **section**
+ * number. Its annotations therefore live under the empty-string key.
+ */
+export const doctrineAndCovenantsAnnotations: BookAnnotations = {
+  '': [
+    [1, 1, 'the Lord', "the Lord's own preface to the Doctrine and Covenants, Hiram, Ohio, 1831"],
+    [2, 2, 'Moroni', 'the words of Moroni to Joseph Smith about Elijah and the fathers, 1823'],
+    [3, 5, 'the Lord', 'the lost 116 pages, and Martin Harris called as a witness, Harmony, 1828—29'],
+    [6, 9, 'the Lord', 'revelations to Oliver Cowdery as he scribes the translation, Harmony, 1829'],
+    [10, 11, 'the Lord', 'the plan behind the lost manuscript, and a call to Hyrum Smith'],
+    [12, 13, 'the Lord and John the Baptist', 'Joseph Knight is called; the Aaronic Priesthood is restored, May 1829'],
+    [14, 17, 'the Lord', 'the Whitmers are called and the Three Witnesses are promised the plates, 1829'],
+    [18, 19, 'the Lord', 'the Twelve are to be chosen; the Lord describes His suffering to Martin Harris'],
+    [20, 22, 'the Lord', 'the Church is organized 6 April 1830 — its articles, covenants, and ordinances'],
+    [23, 26, 'the Lord', 'early callings at Fayette and Manchester; Emma Smith called an elect lady'],
+    [27, 28, 'the Lord', 'the sacrament emblems, and the law of revelation after Hiram Page’s stone'],
+    [29, 31, 'the Lord', 'the gathering, the Millennium, and the first mission to the Lamanites, 1830'],
+    [32, 36, 'the Lord', 'the move to Ohio; Sidney Rigdon and Edward Partridge are called, 1830—31'],
+    [37, 40, 'the Lord', 'the Saints are commanded to gather to Ohio'],
+    [41, 44, 'the Lord', 'the law of the Church and the law of consecration, Kirtland, February 1831'],
+    [45, 49, 'the Lord', 'signs of the Second Coming, the Shakers answered, and gifts of the Spirit'],
+    [50, 56, 'the Lord', 'how to discern false spirits, and the elders sent up to Missouri, 1831'],
+    [57, 59, 'the Lord', 'Independence, Missouri is named the center place of Zion, August 1831'],
+    [60, 64, 'the Lord', 'the return from Missouri, the river revelation, and the duty to forgive'],
+    [65, 70, 'the Lord', 'the stewardship of the revelations and their printing, Hiram, Ohio, 1831'],
+    [71, 75, 'the Lord', 'preaching to answer persecution; bishops called and missions assigned'],
+    [76, 76, 'Joseph Smith and Sidney Rigdon', '"the Vision" of the three degrees of glory, Hiram, Ohio, February 1832'],
+    [77, 80, 'the Lord', 'questions on the book of Revelation answered; the United Firm; missionary calls'],
+    [81, 83, 'the Lord', 'counselors in the Presidency, and the care of widows and orphans, 1832'],
+    [84, 85, 'the Lord', 'the oath and covenant of the priesthood, Kirtland, September 1832'],
+    [86, 87, 'the Lord', 'the parable of the wheat and the tares, and the prophecy on war, 1832'],
+    [88, 88, 'the Lord', 'the "olive leaf" — light of Christ, resurrection, and the School of the Prophets'],
+    [89, 90, 'the Lord', 'the Word of Wisdom, and the keys given to the First Presidency, 1833'],
+    [91, 95, 'the Lord', 'the Apocrypha, "the glory of God is intelligence," and the Kirtland Temple commanded'],
+    [96, 101, 'the Lord', 'the Saints are driven from Jackson County; the parable of the nobleman, 1833'],
+    [102, 105, 'the Lord', "high councils organized and Zion's Camp marches to Missouri, 1834"],
+    [106, 108, 'the Lord', 'the Twelve and the Seventy are organized at Kirtland, 1835'],
+    [109, 110, 'Joseph Smith and the Lord', 'the Kirtland Temple dedicatory prayer, then Christ, Moses, Elias, and Elijah appear'],
+    [111, 114, 'the Lord', 'the errand to Salem, the charge to the Twelve, and the mission abroad, 1836—38'],
+    [115, 120, 'the Lord', 'Far West, the name of the Church, and the law of tithing, 1838'],
+    [121, 123, 'Joseph Smith', 'written from Liberty Jail — "O God, where art thou?" and the rights of the priesthood'],
+    [124, 129, 'the Lord', 'Nauvoo — the temple, baptism for the dead, and how to detect a true messenger'],
+    [130, 131, 'Joseph Smith', 'teachings recorded at Ramus, Illinois, on God, spirit matter, and eternal marriage'],
+    [132, 132, 'the Lord', 'the new and everlasting covenant of marriage, recorded July 1843'],
+    [133, 134, 'the Lord', 'the appendix on the Second Coming, and the declaration on earthly governments'],
+    [135, 136, 'John Taylor and Brigham Young', 'the martyrdom of Joseph and Hyrum, and the word on the westward camps'],
+    [137, 137, 'Joseph Smith', 'the vision of the celestial kingdom and of Alvin, Kirtland Temple, January 1836'],
+    [138, 138, 'Joseph F. Smith', 'the vision of the redemption of the dead, Salt Lake City, October 1918'],
+  ],
+};
